@@ -1008,119 +1008,36 @@ MODULE_HOOK_MAPPING = {
     nn.GRUCell: _rnn_cell_forward_hook,
 }
 
+def _num_to_string(num, units=None, precision=2, unit="", order_names=["", "K", "M", "G", "T"], bias=0):
+    order = int(min(max(np.log10(num)/3 + bias, 0), len(order_names)-1))
+    num *= 1000**(bias-order)
+    if units is None:
+        units = order_names[order] + unit
+    
+    return str(round(num, precision)) + " " + units
 
 def num_to_string(num, precision=2):
-    if num // 10**9 > 0:
-        return str(round(num / 10.0**9, precision)) + " G"
-    elif num // 10**6 > 0:
-        return str(round(num / 10.0**6, precision)) + " M"
-    elif num // 10**3 > 0:
-        return str(round(num / 10.0**3, precision)) + " K"
-    else:
-        return str(num)
+    return _num_to_string(num, precision=precision)
 
 
 def macs_to_string(macs, units=None, precision=2):
-    if units is None:
-        if macs // 10**9 > 0:
-            return str(round(macs / 10.0**9, precision)) + " GMACs"
-        elif macs // 10**6 > 0:
-            return str(round(macs / 10.0**6, precision)) + " MMACs"
-        elif macs // 10**3 > 0:
-            return str(round(macs / 10.0**3, precision)) + " KMACs"
-        else:
-            return str(macs) + " MACs"
-    else:
-        if units == "GMACs":
-            return str(round(macs / 10.0**9, precision)) + " " + units
-        elif units == "MMACs":
-            return str(round(macs / 10.0**6, precision)) + " " + units
-        elif units == "KMACs":
-            return str(round(macs / 10.0**3, precision)) + " " + units
-        else:
-            return str(macs) + " MACs"
+    return _num_to_string(macs, units=units, precision=precision, unit="MACs")
 
 
 def number_to_string(num, units=None, precision=2):
-    if units is None:
-        if num // 10**9 > 0:
-            return str(round(num / 10.0**9, precision)) + " G"
-        elif num // 10**6 > 0:
-            return str(round(num / 10.0**6, precision)) + " M"
-        elif num // 10**3 > 0:
-            return str(round(num / 10.0**3, precision)) + " K"
-        else:
-            return str(num) + " "
-    else:
-        if units == "G":
-            return str(round(num / 10.0**9, precision)) + " " + units
-        elif units == "M":
-            return str(round(num / 10.0**6, precision)) + " " + units
-        elif units == "K":
-            return str(round(num / 10.0**3, precision)) + " " + units
-        else:
-            return str(num) + " "
+    return _num_to_string(num, units=units, precision=precision)
 
 
 def flops_to_string(flops, units=None, precision=2):
-    if units is None:
-        if flops // 10**12 > 0:
-            return str(round(flops / 10.0**12, precision)) + " TFLOPS"
-        if flops // 10**9 > 0:
-            return str(round(flops / 10.0**9, precision)) + " GFLOPS"
-        elif flops // 10**6 > 0:
-            return str(round(flops / 10.0**6, precision)) + " MFLOPS"
-        elif flops // 10**3 > 0:
-            return str(round(flops / 10.0**3, precision)) + " KFLOPS"
-        else:
-            return str(flops) + " FLOPS"
-    else:
-        if units == "TFLOPS":
-            return str(round(flops / 10.0**12, precision)) + " " + units
-        if units == "GFLOPS":
-            return str(round(flops / 10.0**9, precision)) + " " + units
-        elif units == "MFLOPS":
-            return str(round(flops / 10.0**6, precision)) + " " + units
-        elif units == "KFLOPS":
-            return str(round(flops / 10.0**3, precision)) + " " + units
-        else:
-            return str(flops) + " FLOPS"
+    return _num_to_string(flops, units=units, precision=precision, unit="FLOPs")
 
 
 def params_to_string(params_num, units=None, precision=2):
-    if units is None:
-        if params_num // 10**6 > 0:
-            return str(round(params_num / 10**6, 2)) + " M"
-        elif params_num // 10**3:
-            return str(round(params_num / 10**3, 2)) + " k"
-        else:
-            return str(params_num)
-    else:
-        if units == "M":
-            return str(round(params_num / 10.0**6, precision)) + " " + units
-        elif units == "K":
-            return str(round(params_num / 10.0**3, precision)) + " " + units
-        else:
-            return str(params_num)
+    return _num_to_string(params_num, units=units, precision=precision, order_names=["", "k", "M", "G"])
 
 
 def duration_to_string(duration, units=None, precision=2):
-    if units is None:
-        if duration > 1:
-            return str(round(duration, precision)) + " s"
-        elif duration * 10**3 > 1:
-            return str(round(duration * 10**3, precision)) + " ms"
-        elif duration * 10**6 > 1:
-            return str(round(duration * 10**6, precision)) + " us"
-        else:
-            return str(duration)
-    else:
-        if units == "us":
-            return str(round(duration * 10.0**6, precision)) + " " + units
-        elif units == "ms":
-            return str(round(duration * 10.0**3, precision)) + " " + units
-        else:
-            return str(round(duration, precision)) + " s"
+    return _num_to_string(duration, units=units, precision=precision, order_names=["n", "u", "m", ""], bias=3, unit="s")
 
 
     # can not iterate over all submodules using self.model.modules()
