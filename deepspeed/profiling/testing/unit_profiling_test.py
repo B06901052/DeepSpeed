@@ -1,8 +1,12 @@
+import os
+import sys
 import torch
 import fairseq
 import logging
 import argparse
 import s3prl.hub as hub
+
+sys.path.append(os.path.realpath(os.path.join(__file__, "../../")))
 
 from flops_profiler import get_model_profile
 from sample_models import UnitsModel

@@ -1,10 +1,13 @@
 import time
+import typing
 import logging
+import inspect
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functools import partial
-from typing import Callable, List, Optional, Tuple, _Final
+import torchaudio
+import torchvision
 from collections import OrderedDict
 import numpy as np
 
@@ -20,10 +23,10 @@ Tensor = torch.Tensor
 module_flop_count = []
 module_mac_count = []
 
+# FIXME: should consider two funcions from diff. modules while their names are the same.
 # Here lists the functions which have not to been counted.
 old_functions = {
-    "dropout": F.dropout,
-    "Tensor": F.Tensor,
+    ("torch.nn.functional", "dropout"): F.dropout,
 }
 
 
@@ -78,8 +81,8 @@ class FlopsProfiler(object):
             ignore_list (list, optional): the list of modules to ignore while profiling. Defaults to None.
         """
         self.reset_profile()
-        _patch_functionals()
-        _patch_tensor_methods()
+        _patch_torch()
+        _patch_torchaudio()
 
         def register_module_hooks(module, ignore_list):
             if ignore_list and type(module) in ignore_list:
@@ -120,7 +123,7 @@ class FlopsProfiler(object):
 
             module.__end_time_hook_handle__ = module.register_forward_hook(end_time_hook)
 
-        self.model.apply(partial(register_module_hooks, ignore_list=ignore_list))
+        self.model.apply(functools.partial(register_module_hooks, ignore_list=ignore_list))
         self.started = True
         self.func_patched = True
 
@@ -359,7 +362,7 @@ class FlopsProfiler(object):
             duration = get_module_duration(module)
 
             # TODO: make them can be optional
-            
+
             items.append(duration_to_string(duration))
             items.append(
                 "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
@@ -644,9 +647,9 @@ def _batch_norm_flops_compute(
 
 def _layer_norm_flops_compute(
     input: Tensor,
-    normalized_shape: List[int],
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    normalized_shape: typing.List[int],
+    weight: typing.Optional[Tensor] = None,
+    bias: typing.Optional[Tensor] = None,
     eps: float = 1e-5,
 ):
     has_affine = weight is not None
@@ -656,8 +659,8 @@ def _layer_norm_flops_compute(
 
 def _group_norm_flops_compute(input: Tensor,
                               num_groups: int,
-                              weight: Optional[Tensor] = None,
-                              bias: Optional[Tensor] = None,
+                              weight: typing.Optional[Tensor] = None,
+                              bias: typing.Optional[Tensor] = None,
                               eps: float = 1e-5):
     has_affine = weight is not None
     # estimation
@@ -666,10 +669,10 @@ def _group_norm_flops_compute(input: Tensor,
 
 def _instance_norm_flops_compute(
     input: Tensor,
-    running_mean: Optional[Tensor] = None,
-    running_var: Optional[Tensor] = None,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    running_mean: typing.Optional[Tensor] = None,
+    running_var: typing.Optional[Tensor] = None,
+    weight: typing.Optional[Tensor] = None,
+    bias: typing.Optional[Tensor] = None,
     use_input_stats: bool = True,
     momentum: float = 0.1,
     eps: float = 1e-5,
@@ -765,15 +768,7 @@ def _tensor_addmm_flops_compute(self, mat1, mat2, *, beta=1, alpha=1, out=None):
     return 2 * macs + _prod(self.shape), macs
 
 
-def _mul_flops_compute(input, other, *, out=None):
-    return _elementwise_flops_compute(input, other)
-
-
-def _add_flops_compute(input, other, *, alpha=1, out=None):
-    return _elementwise_flops_compute(input, other)
-
-
-def _elementwise_flops_compute(input, other):
+def _elementwise_flops_compute(input, other, *args, **kwargs):
     if not torch.is_tensor(input):
         if torch.is_tensor(other):
             return _prod(other.shape), 0
@@ -799,39 +794,89 @@ def _elementwise_flops_compute(input, other):
 
 
 def wrapFunc(func, funcFlopCompute):
-    oldFunc = func
     name = func.__name__
-    old_functions[name] = oldFunc
+    if inspect.isfunction(func) or inspect.isbuiltin(func):
+        old_functions[(func.__module__, name)] = func
+    elif inspect.ismethod(func):
+        try:
+            old_functions[(func.__objclass__, name)] = func
+        except AttributeError:
+            logger.error("{} is not correct wrapped".format(func))
+        
 
+    @functools.wraps(func)
     def newFunc(*args, **kwds):
         flops, macs = funcFlopCompute(*args, **kwds)
         if module_flop_count:
             module_flop_count[-1].append((name, flops))
         if module_mac_count and macs:
             module_mac_count[-1].append((name, macs))
-        return oldFunc(*args, **kwds)
-
-    newFunc.__name__ = func.__name__
+        return func(*args, **kwds)
 
     return newFunc
 
 def wrapWarning(func):
-    oldFunc = func
     name = func.__name__
-    old_functions[name] = oldFunc
-    
-    if name.startswith("_"):
-        return func
-    else:
-        def newFunc(*args, **kwds):
-            logger.warning("forward an unimplemented function: {}".format(name))
-            return oldFunc(*args, **kwds)
+    if inspect.isfunction(func) or inspect.isbuiltin(func):
+        old_functions[(func.__module__, name)] = func
+    elif inspect.ismethod(func):
+        try:
+            old_functions[(func.__objclass__, name)] = func
+        except AttributeError:
+            logger.error("{} is not correct wrapped".format(func))
 
-        newFunc.__name__ = func.__name__
+    @functools.wraps(func)
+    def newFunc(*args, **kwds):
+        logger.warning("forward an unimplemented function: {}".format(name))
+        return func(*args, **kwds)
 
-        return newFunc    
+    return newFunc
+
+# for checking unimplemented part in function level
+def _check_func_level_patch(pytorch_module):
+    count = 0
+    overridable_functions = torch.overrides.get_overridable_functions()[pytorch_module]
+    for name in dir(pytorch_module):
+        func = getattr(pytorch_module, name)
+        if (
+            func in overridable_functions and # exclude func from typing
+            not (func.__module__, name) in old_functions
+        ):
+            count += 1
+            logger.debug("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
+            setattr(pytorch_module, name, wrapWarning(func))
     
-def _patch_functionals():
+    logger.debug("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
+ 
+def _patch_torch():
+    # functional level
+    _patch_autograd()
+    _patch_fft()
+    _patch_nn_functionals()
+    _patch_linalg()
+    _patch_special()
+    
+    # operator level
+    _patch_tensor_methods()
+    
+def _patch_torchvision():
+    # TODO: finish it (ops, torch, transforms), make it optional
+    pass
+ 
+def _patch_torchaudio():
+    # TODO: finish it (functional), make it optional
+    _check_func_level_patch(torchaudio.functional)
+    pass
+    
+def _patch_autograd():
+    # TODO: finish it
+    _check_func_level_patch(torch.autograd)
+    
+def _patch_fft():
+    # TODO: finish it
+    _check_func_level_patch(torch.fft)
+
+def _patch_nn_functionals():
     # FC
     F.linear = wrapFunc(F.linear, _linear_flops_compute)
 
@@ -886,19 +931,15 @@ def _patch_functionals():
     F.embedding = wrapFunc(F.embedding, _embedding_flops_compute)
     
     # not implemented
-    for name in dir(F):
-        func = getattr(F, name)
-        if (
-            hasattr(func, "__call__") and
-            not isinstance(func, _Final) and # exclude func from typing
-            not name in old_functions and
-            not name.startswith("_") and
-            not name.endswith("_")
-        ):
-            logger.debug("Unsupported function: {}".format(name))
-            setattr(F, name, wrapWarning(func))
+    _check_func_level_patch(F)
 
-
+def _patch_linalg():
+    # TODO: finish it
+    _check_func_level_patch(torch.linalg)
+    
+def _patch_special():
+    # TODO: finish it
+    _check_func_level_patch(torch.special)
 
 def _patch_tensor_methods():
     torch.matmul = wrapFunc(torch.matmul, _matmul_flops_compute)
@@ -934,12 +975,11 @@ def _patch_tensor_methods():
 def _reload_functionals():
     for name in dir(F):
         if name in old_functions:
-            logger.debug("reload function: {}".format(name))
-            setattr(F, name, old_functions[name])
+            setattr(F, name, old_functions[(F.__name__, name)])
 
 
 def _reload_tensor_methods():
-    torch.matmul = old_functions[torch.matmul.__name__]
+    torch.matmul = old_functions[(None, torch.matmul.__name__)]
 
 
 def _rnn_flops(flops, rnn_module, w_ih, w_hh, input_size):
