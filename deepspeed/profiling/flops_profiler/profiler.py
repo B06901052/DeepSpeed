@@ -826,8 +826,8 @@ def wrapWarning(func):
 
         newFunc.__name__ = func.__name__
 
-        return newFunc
-
+        return newFunc    
+    
 def _patch_functionals():
     # FC
     F.linear = wrapFunc(F.linear, _linear_flops_compute)
@@ -894,12 +894,13 @@ def _patch_functionals():
         ):
             logger.debug("Unsupported function: {}".format(name))
             setattr(F, name, wrapWarning(func))
-    
+
 
 
 def _patch_tensor_methods():
     torch.matmul = wrapFunc(torch.matmul, _matmul_flops_compute)
     torch.Tensor.matmul = wrapFunc(torch.Tensor.matmul, _matmul_flops_compute)
+    torch.Tensor.__matmul__ = torch.Tensor.matmul
     torch.mm = wrapFunc(torch.mm, _matmul_flops_compute)
     torch.Tensor.mm = wrapFunc(torch.Tensor.mm, _matmul_flops_compute)
     torch.bmm = wrapFunc(torch.bmm, _matmul_flops_compute)
@@ -908,11 +909,21 @@ def _patch_tensor_methods():
     torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
 
-    torch.mul = wrapFunc(torch.mul, _mul_flops_compute)
-    torch.Tensor.mul = wrapFunc(torch.Tensor.mul, _mul_flops_compute)
+    torch.mul = wrapFunc(torch.mul, _elementwise_flops_compute)
+    torch.Tensor.mul = wrapFunc(torch.Tensor.mul, _elementwise_flops_compute)
+    torch.Tensor.__mul__ = torch.Tensor.mul
+    
+    torch.div = wrapFunc(torch.div, _elementwise_flops_compute)
+    torch.Tensor.div = wrapFunc(torch.Tensor.div, _elementwise_flops_compute)
+    torch.Tensor.__div__ = torch.Tensor.div
 
-    torch.add = wrapFunc(torch.add, _add_flops_compute)
-    torch.Tensor.add = wrapFunc(torch.Tensor.add, _add_flops_compute)
+    torch.add = wrapFunc(torch.add, _elementwise_flops_compute)
+    torch.Tensor.add = wrapFunc(torch.Tensor.add, _elementwise_flops_compute)
+    torch.Tensor.__add__ = torch.Tensor.add
+    
+    torch.sub = wrapFunc(torch.sub, _elementwise_flops_compute)
+    torch.Tensor.sub = wrapFunc(torch.Tensor.sub, _elementwise_flops_compute)
+    torch.Tensor.__sub__ = torch.Tensor.sub
 
     torch.einsum = wrapFunc(torch.einsum, _einsum_flops_compute)
 
