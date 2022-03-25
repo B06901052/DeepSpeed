@@ -1,17 +1,30 @@
 import time
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, _Final
 from collections import OrderedDict
 import numpy as np
+
+logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+formatter: logging.Formatter = logging.Formatter('[%(module)s] %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
 
 Tensor = torch.Tensor
 
 module_flop_count = []
 module_mac_count = []
-old_functions = {}
+
+# Here lists the functions which have not to been counted.
+old_functions = {
+    "dropout": F.dropout,
+    "Tensor": F.Tensor,
+}
 
 
 class FlopsProfiler(object):
@@ -799,6 +812,21 @@ def wrapFunc(func, funcFlopCompute):
 
     return newFunc
 
+def wrapWarning(func):
+    oldFunc = func
+    name = func.__name__
+    old_functions[name] = oldFunc
+    
+    if name.startswith("_"):
+        return func
+    else:
+        def newFunc(*args, **kwds):
+            logger.warning("forward an unimplemented function: {}".format(name))
+            return oldFunc(*args, **kwds)
+
+        newFunc.__name__ = func.__name__
+
+        return newFunc
 
 def _patch_functionals():
     # FC
@@ -853,6 +881,20 @@ def _patch_functionals():
 
     # embedding
     F.embedding = wrapFunc(F.embedding, _embedding_flops_compute)
+    
+    # not implemented
+    for name in dir(F):
+        func = getattr(F, name)
+        if (
+            hasattr(func, "__call__") and
+            not isinstance(func, _Final) and # exclude func from typing
+            not name in old_functions and
+            not name.startswith("_") and
+            not name.endswith("_")
+        ):
+            logger.debug("Unsupported function: {}".format(name))
+            setattr(F, name, wrapWarning(func))
+    
 
 
 def _patch_tensor_methods():
@@ -876,36 +918,10 @@ def _patch_tensor_methods():
 
 
 def _reload_functionals():
-    # torch.nn.functional does not support importlib.reload()
-    F.linear = old_functions[F.linear.__name__]
-    F.conv1d = old_functions[F.conv1d.__name__]
-    F.conv2d = old_functions[F.conv2d.__name__]
-    F.conv3d = old_functions[F.conv3d.__name__]
-    F.conv_transpose1d = old_functions[F.conv_transpose1d.__name__]
-    F.conv_transpose2d = old_functions[F.conv_transpose2d.__name__]
-    F.conv_transpose3d = old_functions[F.conv_transpose3d.__name__]
-    F.relu = old_functions[F.relu.__name__]
-    F.prelu = old_functions[F.prelu.__name__]
-    F.elu = old_functions[F.elu.__name__]
-    F.leaky_relu = old_functions[F.leaky_relu.__name__]
-    F.relu6 = old_functions[F.relu6.__name__]
-    F.batch_norm = old_functions[F.batch_norm.__name__]
-    F.avg_pool1d = old_functions[F.avg_pool1d.__name__]
-    F.avg_pool2d = old_functions[F.avg_pool2d.__name__]
-    F.avg_pool3d = old_functions[F.avg_pool3d.__name__]
-    F.max_pool1d = old_functions[F.max_pool1d.__name__]
-    F.max_pool2d = old_functions[F.max_pool2d.__name__]
-    F.max_pool3d = old_functions[F.max_pool3d.__name__]
-    F.adaptive_avg_pool1d = old_functions[F.adaptive_avg_pool1d.__name__]
-    F.adaptive_avg_pool2d = old_functions[F.adaptive_avg_pool2d.__name__]
-    F.adaptive_avg_pool3d = old_functions[F.adaptive_avg_pool3d.__name__]
-    F.adaptive_max_pool1d = old_functions[F.adaptive_max_pool1d.__name__]
-    F.adaptive_max_pool2d = old_functions[F.adaptive_max_pool2d.__name__]
-    F.adaptive_max_pool3d = old_functions[F.adaptive_max_pool3d.__name__]
-    F.upsample = old_functions[F.upsample.__name__]
-    F.interpolate = old_functions[F.interpolate.__name__]
-    F.softmax = old_functions[F.softmax.__name__]
-    F.embedding = old_functions[F.embedding.__name__]
+    for name in dir(F):
+        if name in old_functions:
+            logger.debug("reload function: {}".format(name))
+            setattr(F, name, old_functions[name])
 
 
 def _reload_tensor_methods():
