@@ -352,16 +352,19 @@ class FlopsProfiler(object):
             macs = get_module_macs(module)
             items = [
                 params_to_string(params),
-                "{:.2%} Params".format(params / total_params),
+                "{:.2%} Params".format(params / (total_params + 1e-9)),
                 macs_to_string(macs),
-                "{:.2%} MACs".format(0.0 if total_macs == 0 else macs / total_macs),
+                "{:.2%} MACs".format(0.0 if total_macs == 0 else macs / (total_macs + 1e-9)),
             ]
             duration = get_module_duration(module)
 
+            # TODO: make them can be optional
+            
             items.append(duration_to_string(duration))
             items.append(
                 "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
                                         total_duration))
+            items.append(flops_to_string(flops).lower())
             items.append(flops_to_string(0.0 if duration == 0 else flops / duration))
             items.append(module.original_extra_repr())
             return ", ".join(items)
@@ -1028,7 +1031,7 @@ def _num_to_string(num, units=None, precision=2, unit="", order_names=["", "K", 
     return str(round(num, precision)) + " " + units
 
 def num_to_string(num, precision=2):
-    return _num_to_string(num, precision=precision)
+    return _num_to_string(num, precision=precision, order_names=["", "K", "M", "G"])
 
 
 def macs_to_string(macs, units=None, precision=2):
