@@ -284,11 +284,12 @@ class TorchTensorPow(ScalerOpBlock):
 
 
 class UnitsModel(nn.Module):
-    # TODO (joseph): add torch_tensor_op_test
     # TODO (joseph): add matmul block
+    # TODO (joseph): input_size
     syntax_sugar_scalerop_test = {
         "test_name": "syntax_sugar_scalerop_test",
         "modules": [Add, Mul, Sub, Div, Pow],
+        "input_shape": (2, 2),
         "args": {
                 "order": ["pre", "inplace", "post"],    
                 "dtype": [int, float, torch.Tensor],    
@@ -297,6 +298,7 @@ class UnitsModel(nn.Module):
     torch_scalerop_test = {
         "test_name": "torch_scalerop_test",
         "modules": [TorchAdd, TorchMul, TorchSub, TorchDiv, TorchTrueDiv, TorchPow],
+        "input_shape": (2, 2),
         "args": {
                 "order": ["pre", "post"],    
                 "dtype": [int, float, torch.Tensor],    
@@ -305,14 +307,13 @@ class UnitsModel(nn.Module):
     torch_tensor_scalerop_test = {
         "test_name": "torch_tensor_scalerop_test",
         "modules": [TorchAdd, TorchMul, TorchSub, TorchDiv, TorchTrueDiv, TorchPow],
+        "input_shape": (2, 2),
         "args": {
-                "order": ["pre", "inplace", "post"],    
+                "order": ["pre", "post"],    
                 "dtype": [int, float, torch.Tensor],    
         },
     },
     
-
-    # torch_tensor_op_test = [Add, Mul, Sub, Div, Pow]
     def __init__(self, test_name="", test_config=None):
         """UnitsModel
 
@@ -321,6 +322,7 @@ class UnitsModel(nn.Module):
             test_config (dict, optional): Customized an test, Defaults to None. It should include:
                 test_name (str): The name of your test.
                 modules (List[nn.Module]): The modules you want test
+                input_shape (Tuple[int]):
                 args (Dict[str, list], optional): It should be:
                     keys (str): The name of arg
                     value (list): The values of arg
@@ -339,21 +341,28 @@ class UnitsModel(nn.Module):
     def generate_blocks(self):
         nn.Sequential._get_name = lambda self: self.__name__
         allblocks = []
+        
+        # iterate all modules
         for module in self.test_config["modules"]:
             module._get_name = lambda self: self.__name__
             blocks = []
+            
+            # iterate all combinations of args
             for args_cmb in itertools.product(*self.test_config["args"].values()):
                 args_cmb = dict(zip(self.test_config["args"].keys(), args_cmb))
+                # check the arg combination is valid
                 if hasattr(module, "check_args_valid"):
                     if not module.check_args_valid(**args_cmb):
                         continue
                 blocks.append(module(**args_cmb))
                 blocks[-1].__name__ = "_".join(map(lambda x: str(x), args_cmb.values()))
             
+            # Merge to module level
             blocks = nn.Sequential(*blocks)
             blocks.__name__ = module.__name__ + "TestBlock"
             allblocks.append(blocks)
         
+        # Merge to test level
         allblocks = nn.Sequential(*allblocks)
         allblocks.__name__ = self.test_config["test_name"]
         
