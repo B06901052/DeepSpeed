@@ -16,7 +16,14 @@ handler = logging.StreamHandler()
 formatter: logging.Formatter = logging.Formatter('[%(module)s] %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-logger.setLevel(logging.DEBUG)
+
+# print all functions called with their input/output (only when level == it will trigger)
+logging.addLevelName(15, "SHOWFUNC")
+logging.SHOWFUNC = 15 
+# print all unsupport function
+logging.addLevelName(5, "SHOWUNTRACK")
+logging.SHOWUNTRACK = 5 
+logger.setLevel(logging.SHOWUNTRACK)
 
 Tensor = torch.Tensor
 
@@ -27,6 +34,8 @@ module_mac_count = []
 # Here lists the functions which have not to been counted.
 old_functions = {
     ("torch.nn.functional", "dropout"): F.dropout,
+    ("torch.nn.functional", "dropout2d"): F.dropout2d,
+    ("torch.nn.functional", "dropout3d"): F.dropout3d,
 }
 
 
@@ -492,6 +501,9 @@ def _prod(dims):
         p *= v
     return p
 
+# for passing the computed value
+def _zero_flops_compute(*args, **kwargs):
+    return 0, 0
 
 def _linear_flops_compute(input, weight, bias=None):
     out_features = weight.shape[0]
@@ -797,13 +809,34 @@ def wrapFunc(func, funcFlopCompute):
     name = func.__name__
     if inspect.isfunction(func) or inspect.isbuiltin(func):
         old_functions[(func.__module__, name)] = func
-    elif inspect.ismethod(func):
+    else:
         try:
             old_functions[(func.__objclass__, name)] = func
         except AttributeError:
-            logger.error("{} is not correct wrapped".format(func))
+            logger.error("{} is not correctly wrapped".format(func))
         
 
+    @functools.wraps(func)
+    def newFuncLogging(*args, **kwds):
+        try:
+            logger.log(logging.SHOWFUNC, func.__objclass__)
+        except:
+            logger.log(logging.SHOWFUNC, func.__module__)
+        logger.log(logging.SHOWFUNC, name + " is called !!!!")
+        if isinstance(args[0], (torch.Tensor, int, float)):
+            print("input:\n", args[0].detach().numpy())
+
+        flops, macs = funcFlopCompute(*args, **kwds)
+        if module_flop_count:
+            module_flop_count[-1].append((name, flops))
+        if module_mac_count and macs:
+            module_mac_count[-1].append((name, macs))
+            
+        result = func(*args, **kwds)
+        print("output:\n", result.detach().numpy())
+        logger.log(logging.SHOWFUNC, name + " is done !!!!\n")
+        return result
+    
     @functools.wraps(func)
     def newFunc(*args, **kwds):
         flops, macs = funcFlopCompute(*args, **kwds)
@@ -813,7 +846,7 @@ def wrapFunc(func, funcFlopCompute):
             module_mac_count[-1].append((name, macs))
         return func(*args, **kwds)
 
-    return newFunc
+    return newFuncLogging if logger.level == logging.SHOWFUNC else newFunc
 
 def wrapWarning(func):
     name = func.__name__
@@ -839,18 +872,21 @@ def _check_func_level_patch(pytorch_module):
     for name in dir(pytorch_module):
         func = getattr(pytorch_module, name)
         if (
-            func in overridable_functions and # exclude func from typing
+            (
+                func in overridable_functions or # exclude func from typing
+                not pytorch_module.__name__.startswith("torch.")
+            ) and 
+            hasattr(func, "__call__") and
             not (func.__module__, name) in old_functions
         ):
             count += 1
-            logger.debug("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
+            logger.log(logging.SHOWUNTRACK, "[{}] Untracked function: {}".format(pytorch_module.__name__, name))
             setattr(pytorch_module, name, wrapWarning(func))
     
-    logger.debug("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
+    logger.log(logging.SHOWUNTRACK, "[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
  
 def _patch_torch():
     # functional level
-    _patch_autograd()
     _patch_fft()
     _patch_nn_functionals()
     _patch_linalg()
@@ -867,10 +903,6 @@ def _patch_torchaudio():
     # TODO: finish it (functional), make it optional
     _check_func_level_patch(torchaudio.functional)
     pass
-    
-def _patch_autograd():
-    # TODO: finish it
-    _check_func_level_patch(torch.autograd)
     
 def _patch_fft():
     # TODO: finish it
@@ -944,7 +976,8 @@ def _patch_special():
 def _patch_tensor_methods():
     torch.matmul = wrapFunc(torch.matmul, _matmul_flops_compute)
     torch.Tensor.matmul = wrapFunc(torch.Tensor.matmul, _matmul_flops_compute)
-    torch.Tensor.__matmul__ = torch.Tensor.matmul
+    torch.Tensor.__matmul__ = wrapFunc(torch.Tensor.__matmul__, _matmul_flops_compute)
+    
     torch.mm = wrapFunc(torch.mm, _matmul_flops_compute)
     torch.Tensor.mm = wrapFunc(torch.Tensor.mm, _matmul_flops_compute)
     torch.bmm = wrapFunc(torch.bmm, _matmul_flops_compute)
@@ -952,23 +985,33 @@ def _patch_tensor_methods():
 
     torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
-
-    torch.mul = wrapFunc(torch.mul, _elementwise_flops_compute)
-    torch.Tensor.mul = wrapFunc(torch.Tensor.mul, _elementwise_flops_compute)
-    torch.Tensor.__mul__ = torch.Tensor.mul
     
-    torch.div = wrapFunc(torch.div, _elementwise_flops_compute)
-    torch.Tensor.div = wrapFunc(torch.Tensor.div, _elementwise_flops_compute)
-    torch.Tensor.__div__ = torch.Tensor.div
-
-    torch.add = wrapFunc(torch.add, _elementwise_flops_compute)
-    torch.Tensor.add = wrapFunc(torch.Tensor.add, _elementwise_flops_compute)
-    torch.Tensor.__add__ = torch.Tensor.add
+    ops = ["add", "sub", "mul", "div", "truediv", "pow"]
+    for op in ops:
+        if op != "truediv":
+            setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
+            setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
+        else:
+            setattr(torch, "true_divide", wrapFunc(getattr(torch, "true_divide"), _elementwise_flops_compute))
+            setattr(torch.Tensor, "true_divide", wrapFunc(getattr(torch.Tensor, "true_divide"), _elementwise_flops_compute))
+        
+        if op != "pow": # since __rpow__, __pow__ just torch.pow
+            sugar_op = "__{}__".format(op)
+            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+            sugar_op = "__i{}__".format(op)
+            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+            sugar_op = "__r{}__".format(op)
+            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+        else:
+            sugar_op = "__{}__".format(op)
+            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+            sugar_op = "__i{}__".format(op)
+            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _zero_flops_compute))
+            sugar_op = "__r{}__".format(op)
+            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _zero_flops_compute))
     
-    torch.sub = wrapFunc(torch.sub, _elementwise_flops_compute)
-    torch.Tensor.sub = wrapFunc(torch.Tensor.sub, _elementwise_flops_compute)
-    torch.Tensor.__sub__ = torch.Tensor.sub
-
+    
+    
     torch.einsum = wrapFunc(torch.einsum, _einsum_flops_compute)
 
 
