@@ -294,6 +294,7 @@ class FlopsProfiler(object):
         print(
             "\n-------------------------- DeepSpeed Flops Profiler --------------------------"
         )
+        # TODO (joseph Feng): add dtype, device, input shape info
         print(f'Profile Summary at step {profile_step}:')
         print(
             "Notations:\ndata parallel size (dp_size), model parallel size(mp_size),\nnumber of parameters (params), number of multiply-accumulate operations(MACs),\nnumber of floating-point operations (flops), floating-point operations per second (FLOPS),\nfwd latency (forward propagation latency), bwd latency (backward propagation latency),\nstep (weights update latency), iter latency (sum of fwd, bwd and step latency)\n"
@@ -880,6 +881,7 @@ def _check_func_level_patch(pytorch_module):
             not (func.__module__, name) in old_functions
         ):
             count += 1
+            # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
             logger.log(logging.SHOWUNTRACK, "[{}] Untracked function: {}".format(pytorch_module.__name__, name))
             setattr(pytorch_module, name, wrapWarning(func))
     
