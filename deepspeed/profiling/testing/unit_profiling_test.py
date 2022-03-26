@@ -23,10 +23,10 @@ logger.setLevel(logging.INFO)
 def get_profiling_args():
     parser=argparse.ArgumentParser()
     upstreams=[attr for attr in dir(hub) if attr[0] != '_']
-    parser.add_argument('-u', '--upstream', default="toy")
     parser.add_argument('-b', '--batch_size', type=int, default=8)
     parser.add_argument('-l', '--seq_len', type=int, default=160000)
     parser.add_argument('-d', "--device", default="cuda")
+    parser.add_argument('-t', "--test_name", default="syntax_sugar_op_test")
     return parser.parse_args()
 
 
@@ -50,11 +50,11 @@ def deepspeedProfiling(model_func, args):
             top_modules=3,
             warm_up=1,
             as_string=True,
-            output_file="./{}.txt".format(args.upstream),
+            output_file="./{}.txt".format(args.test_name),
             ignore_modules=None,
         )
 
 if __name__ == "__main__":
     args = get_profiling_args()
-    model_func = ToyModel
+    model_func = lambda : UnitsModel(test_name=args.test_name)
     deepspeedProfiling(model_func, args)
