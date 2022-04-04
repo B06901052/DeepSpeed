@@ -26,6 +26,7 @@ def get_profiling_args():
     parser.add_argument('-b', '--batch_size', type=int, default=1)
     parser.add_argument('-l', '--seq_len', type=int, default=160000)
     parser.add_argument('-d', "--device", default="cuda")
+    parser.add_argument('-s', "--show_untracked", help="Show all untracked functions in torch and torchaudio.", action="store_true")
     return parser.parse_args()
 
 
@@ -53,8 +54,9 @@ def deepspeedProfiling(model_func, args):
             top_modules=3,
             warm_up=10,
             as_string=True,
-            output_file="./{}.txt".format(args.upstream),
+            output_file=os.path.join(os.path.dirname(__file__), "log/{}.txt".format(args.upstream)),
             ignore_modules=None,
+            show_untracked=args.show_untracked,
         )
 
 if __name__ == "__main__":

@@ -20,10 +20,8 @@ logger.addHandler(handler)
 # print all functions called with their input/output (only when level == it will trigger)
 logging.addLevelName(15, "SHOWFUNC")
 logging.SHOWFUNC = 15 
-# print all unsupport function
-logging.addLevelName(5, "SHOWUNTRACK")
-logging.SHOWUNTRACK = 5 
-logger.setLevel(logging.SHOWUNTRACK)
+
+logger.setLevel(logging.DEBUG)
 
 Tensor = torch.Tensor
 
@@ -75,11 +73,16 @@ class FlopsProfiler(object):
     Args:
         object (torch.nn.Module): The PyTorch model to profile.
     """
-    def __init__(self, model, ds_engine=None):
+    def __init__(self, model, ds_engine=None, show_untracked=False):
         self.model = model
         self.ds_engine = ds_engine
         self.started = False
         self.func_patched = False
+        self.show_untracked = show_untracked
+        if not self.show_untracked:
+            def untracked_filter(record):
+                return record.msg.find("Untracked function") < 0
+            logger.addFilter(untracked_filter)
 
     def start_profile(self, ignore_list=None):
         """Starts profiling.
@@ -120,6 +123,7 @@ class FlopsProfiler(object):
             module.__post_hook_handle__ = module.register_forward_hook(post_hook)
 
             def start_time_hook(module, input):
+                # TODO: 
                 torch.cuda.synchronize()
                 module.__start_time__ = time.time()
 
@@ -257,7 +261,9 @@ class FlopsProfiler(object):
                             module_depth=-1,
                             top_modules=1,
                             detailed=True,
-                            output_file=None):
+                            output_file=None,
+                            device="cpu",
+                            input_shape=None):
         """Prints the model graph with the measured profile attached to each module.
 
         Args:
@@ -309,6 +315,8 @@ class FlopsProfiler(object):
                 'batch size per GPU: ',
                 self.ds_engine.train_micro_batch_size_per_gpu()))
 
+        print('{:<60}  {}'.format('device: ', device))
+        print('{:<60}  {}'.format('input shape: ', input_shape))
         print('{:<60}  {:<8}'.format('params per gpu: ', params_to_string(total_params)))
         print('{:<60}  {:<8}'.format(
             'params of model = params per GPU * mp_size: ',
@@ -377,6 +385,7 @@ class FlopsProfiler(object):
             items.append(
                 "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
                                         total_duration))
+            items.append(flops_to_string(flops).lower())
             items.append(flops_to_string(flops).lower())
             items.append(flops_to_string(0.0 if duration == 0 else flops / duration))
             items.append(module.original_extra_repr())
@@ -882,10 +891,10 @@ def _check_func_level_patch(pytorch_module):
         ):
             count += 1
             # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
-            logger.log(logging.SHOWUNTRACK, "[{}] Untracked function: {}".format(pytorch_module.__name__, name))
+            logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
             setattr(pytorch_module, name, wrapWarning(func))
     
-    logger.log(logging.SHOWUNTRACK, "[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
+    logger.info("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
  
 def _patch_torch():
     # functional level
@@ -1108,7 +1117,8 @@ MODULE_HOOK_MAPPING = {
 }
 
 def _num_to_string(num, units=None, precision=2, unit="", order_names=["", "K", "M", "G", "T"], bias=0):
-    order = int(min(max(np.log10(num)/3 + bias, 0), len(order_names)-1))
+    order = int(min(max(np.log10(num)/3 + bias if num else 0, 0), len(order_names)-1))
+        
     num *= 1000**(bias-order)
     if units is None:
         units = order_names[order] + unit
@@ -1178,6 +1188,7 @@ def get_model_profile(
     as_string=True,
     output_file=None,
     ignore_modules=None,
+    show_untracked=False,
 ):
     """Returns the total floating-point operations, MACs, and parameters of a model.
 
@@ -1207,7 +1218,7 @@ def get_model_profile(
         The number of floating-point operations, multiply-accumulate operations (MACs), and parameters in the model.
     """
     assert isinstance(model, nn.Module), "model must be a PyTorch module"
-    prof = FlopsProfiler(model)
+    prof = FlopsProfiler(model, show_untracked=show_untracked)
     model.eval()
 
     if input_shape is not None:
@@ -1242,7 +1253,9 @@ def get_model_profile(
                                  module_depth=module_depth,
                                  top_modules=top_modules,
                                  detailed=detailed,
-                                 output_file=output_file)
+                                 output_file=output_file,
+                                 device=args[0][0].device,
+                                 input_shape=input_shape)
 
     prof.end_profile()
     if as_string:
