@@ -36,7 +36,7 @@ class ScalerOpBlock(nn.Module):
         self.order = order
         
     @classmethod
-    def check_args_valid(cls, dtype, order):
+    def check_args_valid(cls, dtype, order, *args, **kwargs):
         return not (
             order == "inplace" and not cls.inplace
         )
@@ -78,7 +78,7 @@ class Sub(ScalerOpBlock):
             return inputs
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
-    
+
 class Mul(ScalerOpBlock):
     inplace = True
     def __init__(self, dtype, order):
@@ -154,6 +154,22 @@ class TorchSub(ScalerOpBlock):
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
     
+class TorchSubtract(ScalerOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.subtract(self.a, inputs)
+        elif self.order == "post":
+            return torch.subtract(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+        
+    @classmethod
+    def check_args_valid(cls, dtype, order, *args, **kwargs):
+        return dtype not in {int, float}
+    
 class TorchMul(ScalerOpBlock):
     def __init__(self, dtype, order):
         super().__init__(dtype, order)
@@ -166,6 +182,22 @@ class TorchMul(ScalerOpBlock):
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
     
+class TorchMultiply(ScalerOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.multiply(self.a, inputs)
+        elif self.order == "post":
+            return torch.multiply(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+        
+    @classmethod
+    def check_args_valid(cls, dtype, order, *args, **kwargs):
+        return dtype not in {int, float}
+    
 class TorchDiv(ScalerOpBlock):
     def __init__(self, dtype, order):
         super().__init__(dtype, order)
@@ -177,6 +209,22 @@ class TorchDiv(ScalerOpBlock):
             return torch.div(inputs, self.a)
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+  
+class TorchDivide(ScalerOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.divide(self.a, inputs)
+        elif self.order == "post":
+            return torch.divide(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+        
+    @classmethod
+    def check_args_valid(cls, dtype, order, *args, **kwargs):
+        return dtype not in {int, float}
     
 class TorchTrueDiv(ScalerOpBlock):
     def __init__(self, dtype, order):
@@ -213,7 +261,7 @@ class ScalerTensorOpBlock(ScalerOpBlock):
         super().__init__(dtype, order)
     
     @classmethod
-    def check_args_valid(cls, dtype, order):
+    def check_args_valid(cls, dtype, order, *args, **kwargs):
         return not (
             dtype in {int, float} and order == "pre"
         ) and super().check_args_valid(dtype, order)
@@ -242,6 +290,18 @@ class TorchTensorSub(ScalerTensorOpBlock):
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
     
+class TorchTensorSubtract(ScalerTensorOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.Tensor.subtract(self.a, inputs)
+        elif self.order == "post":
+            return torch.Tensor.subtract(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+    
 class TorchTensorMul(ScalerTensorOpBlock):
     def __init__(self, dtype, order):
         super().__init__(dtype, order)
@@ -254,6 +314,18 @@ class TorchTensorMul(ScalerTensorOpBlock):
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
     
+class TorchTensorMultiply(ScalerTensorOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.Tensor.multiply(self.a, inputs)
+        elif self.order == "post":
+            return torch.Tensor.multiply(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+    
 class TorchTensorDiv(ScalerTensorOpBlock):
     def __init__(self, dtype, order):
         super().__init__(dtype, order)
@@ -263,6 +335,18 @@ class TorchTensorDiv(ScalerTensorOpBlock):
             return torch.Tensor.div(self.a, inputs)
         elif self.order == "post":
             return torch.Tensor.div(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+    
+class TorchTensorDivide(ScalerTensorOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.Tensor.divide(self.a, inputs)
+        elif self.order == "post":
+            return torch.Tensor.divide(inputs, self.a)
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
     
@@ -302,7 +386,7 @@ syntax_sugar_scalerop_test = {
 
 torch_scalerop_test = {
     "test_name": "torch_scalerop_test",
-    "modules": [TorchAdd, TorchMul, TorchSub, TorchDiv, TorchTrueDiv, TorchPow],
+    "modules": [TorchAdd, TorchMul, TorchMultiply, TorchSub, TorchSubtract, TorchDiv, TorchDivide, TorchTrueDiv, TorchPow],
     "input_shape": (2, 2),
     "args": {
             "order": ["pre", "post"],    
@@ -312,7 +396,7 @@ torch_scalerop_test = {
 
 torch_tensor_scalerop_test = {
     "test_name": "torch_tensor_scalerop_test",
-    "modules": [TorchTensorAdd, TorchTensorMul, TorchTensorSub, TorchTensorDiv, TorchTensorTrueDiv, TorchTensorPow],
+    "modules": [TorchTensorAdd, TorchTensorMul, TorchTensorMultiply, TorchTensorSub, TorchTensorSubtract, TorchTensorDiv, TorchTensorDivide, TorchTensorTrueDiv, TorchTensorPow],
     "input_shape": (2, 2),
     "args": {
             "order": ["pre", "post"],    
