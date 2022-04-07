@@ -1,17 +1,40 @@
 import time
+import typing
+import logging
+import inspect
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functools import partial
-from typing import Callable, List, Optional, Tuple
+import torchaudio
+import torchvision
 from collections import OrderedDict
 import numpy as np
+
+logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+formatter: logging.Formatter = logging.Formatter('[%(module)s] %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+# print all functions called with their input/output (only when level == it will trigger)
+logging.addLevelName(15, "SHOWFUNC")
+logging.SHOWFUNC = 15 
+
+logger.setLevel(logging.DEBUG)
 
 Tensor = torch.Tensor
 
 module_flop_count = []
 module_mac_count = []
-old_functions = {}
+
+# FIXME: should consider two funcions from diff. modules while their names are the same.
+# Here lists the functions which have not to been counted.
+old_functions = {
+    ("torch.nn.functional", "dropout"): F.dropout,
+    ("torch.nn.functional", "dropout2d"): F.dropout2d,
+    ("torch.nn.functional", "dropout3d"): F.dropout3d,
+}
 
 
 class FlopsProfiler(object):
@@ -50,11 +73,16 @@ class FlopsProfiler(object):
     Args:
         object (torch.nn.Module): The PyTorch model to profile.
     """
-    def __init__(self, model, ds_engine=None):
+    def __init__(self, model, ds_engine=None, show_untracked=False):
         self.model = model
         self.ds_engine = ds_engine
         self.started = False
         self.func_patched = False
+        self.show_untracked = show_untracked
+        if not self.show_untracked:
+            def untracked_filter(record):
+                return record.msg.find("Untracked function") < 0
+            logger.addFilter(untracked_filter)
 
     def start_profile(self, ignore_list=None):
         """Starts profiling.
@@ -65,8 +93,8 @@ class FlopsProfiler(object):
             ignore_list (list, optional): the list of modules to ignore while profiling. Defaults to None.
         """
         self.reset_profile()
-        _patch_functionals()
-        _patch_tensor_methods()
+        _patch_torch()
+        _patch_torchaudio()
 
         def register_module_hooks(module, ignore_list):
             if ignore_list and type(module) in ignore_list:
@@ -95,6 +123,7 @@ class FlopsProfiler(object):
             module.__post_hook_handle__ = module.register_forward_hook(post_hook)
 
             def start_time_hook(module, input):
+                # TODO: 
                 torch.cuda.synchronize()
                 module.__start_time__ = time.time()
 
@@ -107,7 +136,7 @@ class FlopsProfiler(object):
 
             module.__end_time_hook_handle__ = module.register_forward_hook(end_time_hook)
 
-        self.model.apply(partial(register_module_hooks, ignore_list=ignore_list))
+        self.model.apply(functools.partial(register_module_hooks, ignore_list=ignore_list))
         self.started = True
         self.func_patched = True
 
@@ -232,7 +261,9 @@ class FlopsProfiler(object):
                             module_depth=-1,
                             top_modules=1,
                             detailed=True,
-                            output_file=None):
+                            output_file=None,
+                            device="cpu",
+                            input_shape=None):
         """Prints the model graph with the measured profile attached to each module.
 
         Args:
@@ -269,6 +300,7 @@ class FlopsProfiler(object):
         print(
             "\n-------------------------- DeepSpeed Flops Profiler --------------------------"
         )
+        # TODO (joseph Feng): add dtype, device, input shape info
         print(f'Profile Summary at step {profile_step}:')
         print(
             "Notations:\ndata parallel size (dp_size), model parallel size(mp_size),\nnumber of parameters (params), number of multiply-accumulate operations(MACs),\nnumber of floating-point operations (flops), floating-point operations per second (FLOPS),\nfwd latency (forward propagation latency), bwd latency (backward propagation latency),\nstep (weights update latency), iter latency (sum of fwd, bwd and step latency)\n"
@@ -283,6 +315,8 @@ class FlopsProfiler(object):
                 'batch size per GPU: ',
                 self.ds_engine.train_micro_batch_size_per_gpu()))
 
+        print('{:<60}  {}'.format('device: ', device))
+        print('{:<60}  {}'.format('input shape: ', input_shape))
         print('{:<60}  {:<8}'.format('params per gpu: ', params_to_string(total_params)))
         print('{:<60}  {:<8}'.format(
             'params of model = params per GPU * mp_size: ',
@@ -339,16 +373,19 @@ class FlopsProfiler(object):
             macs = get_module_macs(module)
             items = [
                 params_to_string(params),
-                "{:.2%} Params".format(params / total_params),
+                "{:.2%} Params".format(params / (total_params + 1e-9)),
                 macs_to_string(macs),
-                "{:.2%} MACs".format(0.0 if total_macs == 0 else macs / total_macs),
+                "{:.2%} MACs".format(0.0 if total_macs == 0 else macs / (total_macs + 1e-9)),
             ]
             duration = get_module_duration(module)
+
+            # TODO: make them can be optional
 
             items.append(duration_to_string(duration))
             items.append(
                 "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
                                         total_duration))
+            items.append(flops_to_string(flops).lower())
             items.append(flops_to_string(0.0 if duration == 0 else flops / duration))
             items.append(module.original_extra_repr())
             return ", ".join(items)
@@ -413,14 +450,11 @@ class FlopsProfiler(object):
             if curr_depth not in info:
                 info[curr_depth] = {}
             if module.__class__.__name__ not in info[curr_depth]:
-                info[curr_depth][module.__class__.__name__] = [
-                    0,
-                    0,
-                    0,
-                ]  # macs, params, time
+                info[curr_depth][module.__class__.__name__] = [0, 0, 0, 0]  # macs, params, time, flops
             info[curr_depth][module.__class__.__name__][0] += get_module_macs(module)
             info[curr_depth][module.__class__.__name__][1] += module.__params__
             info[curr_depth][module.__class__.__name__][2] += get_module_duration(module)
+            info[curr_depth][module.__class__.__name__][3] += get_module_flops(module)
             has_children = len(module._modules.items()) != 0
             if has_children:
                 for child in module.children():
@@ -460,10 +494,18 @@ class FlopsProfiler(object):
                             key=lambda item: item[1][2],
                             reverse=True)[:num_items]
             }
+            sort_flops = {
+                k: flops_to_string(v[3]).lower()
+                for k,
+                v in sorted(info[d].items(),
+                            key=lambda item: item[1][3],
+                            reverse=True)[:num_items]
+            }
 
             print(f"depth {d}:")
             print(f"    params      - {sort_params}")
             print(f"    MACs        - {sort_macs}")
+            print(f"    flops       - {sort_flops}")
             print(f"    fwd latency - {sort_time}")
 
 
@@ -473,6 +515,9 @@ def _prod(dims):
         p *= v
     return p
 
+# for passing the computed value
+def _zero_flops_compute(*args, **kwargs):
+    return 0, 0
 
 def _linear_flops_compute(input, weight, bias=None):
     out_features = weight.shape[0]
@@ -534,7 +579,7 @@ def _conv_flops_compute(input,
     batch_size = input.shape[0]
     in_channels = input.shape[1]
     out_channels = weight.shape[0]
-    kernel_dims = list(weight.shape[-2:])
+    kernel_dims = list(weight.shape[2:])
     input_dims = list(input.shape[2:])
 
     length = len(input_dims)
@@ -628,9 +673,9 @@ def _batch_norm_flops_compute(
 
 def _layer_norm_flops_compute(
     input: Tensor,
-    normalized_shape: List[int],
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    normalized_shape: typing.List[int],
+    weight: typing.Optional[Tensor] = None,
+    bias: typing.Optional[Tensor] = None,
     eps: float = 1e-5,
 ):
     has_affine = weight is not None
@@ -640,8 +685,8 @@ def _layer_norm_flops_compute(
 
 def _group_norm_flops_compute(input: Tensor,
                               num_groups: int,
-                              weight: Optional[Tensor] = None,
-                              bias: Optional[Tensor] = None,
+                              weight: typing.Optional[Tensor] = None,
+                              bias: typing.Optional[Tensor] = None,
                               eps: float = 1e-5):
     has_affine = weight is not None
     # estimation
@@ -650,10 +695,10 @@ def _group_norm_flops_compute(input: Tensor,
 
 def _instance_norm_flops_compute(
     input: Tensor,
-    running_mean: Optional[Tensor] = None,
-    running_var: Optional[Tensor] = None,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    running_mean: typing.Optional[Tensor] = None,
+    running_var: typing.Optional[Tensor] = None,
+    weight: typing.Optional[Tensor] = None,
+    bias: typing.Optional[Tensor] = None,
     use_input_stats: bool = True,
     momentum: float = 0.1,
     eps: float = 1e-5,
@@ -749,15 +794,7 @@ def _tensor_addmm_flops_compute(self, mat1, mat2, *, beta=1, alpha=1, out=None):
     return 2 * macs + _prod(self.shape), macs
 
 
-def _mul_flops_compute(input, other, *, out=None):
-    return _elementwise_flops_compute(input, other)
-
-
-def _add_flops_compute(input, other, *, alpha=1, out=None):
-    return _elementwise_flops_compute(input, other)
-
-
-def _elementwise_flops_compute(input, other):
+def _elementwise_flops_compute(input, other, *args, **kwargs):
     if not torch.is_tensor(input):
         if torch.is_tensor(other):
             return _prod(other.shape), 0
@@ -781,26 +818,169 @@ def _elementwise_flops_compute(input, other):
         flops = _prod(final_shape)
         return flops, 0
 
+def _unary_flops_compute_generator(flop_multiplier=1, flop_bias=0, macs_multiplier=1, macs_bias=0, has_correction=False):
+    def _unary_flops_compute(input, *args, **kwargs):
+        dim = kwargs.get("dim", -1)
+        # var, std, var_mean
+        biased = (
+            kwargs.get("correction") is None and
+            not kwargs.get("unbiased", False)
+        )
+        biased |= (
+            kwargs.get("unbiased") is None and
+            kwargs.get("correction") is not None and
+            kwargs.get("correction", 0) > 0
+        )
+        biased &= has_correction
+        
+        op_num, other_num = 1, 1
+        if dim == -1:
+            op_num = _prod(input.shape)
+             
+        elif type(dim) == int:
+            op_num = input.shape[dim]
+            other_num = _prod(input.shape) // op_num
+        
+        elif type(dim) == tuple:
+            for i in range(input.dim()):
+                if i in dim:
+                    op_num *= input.shape[i]
+                else:
+                    other_num *= input.shape[i]
+            
+        else:
+            raise NotImplementedError
+
+        return other_num * (flop_multiplier * op_num + flop_bias + biased), 0
+    
+    return _unary_flops_compute
+
 
 def wrapFunc(func, funcFlopCompute):
-    oldFunc = func
     name = func.__name__
-    old_functions[name] = oldFunc
+    if inspect.isfunction(func) or inspect.isbuiltin(func):
+        old_functions[(func.__module__, name)] = func
+    else:
+        try:
+            old_functions[(func.__objclass__, name)] = func
+        except AttributeError:
+            logger.error("{} is not correctly wrapped".format(func))
+        
 
+    @functools.wraps(func)
+    def newFuncLogging(*args, **kwds):
+        try:
+            logger.log(logging.SHOWFUNC, func.__objclass__)
+        except:
+            logger.log(logging.SHOWFUNC, func.__module__)
+        logger.log(logging.SHOWFUNC, name + " is called !!!!")
+        if isinstance(args[0], (torch.Tensor, int, float)):
+            print("input:\n", args[0].detach().numpy())
+
+        flops, macs = funcFlopCompute(*args, **kwds)
+        if module_flop_count:
+            module_flop_count[-1].append((name, flops))
+        if module_mac_count and macs:
+            module_mac_count[-1].append((name, macs))
+            
+        result = func(*args, **kwds)
+        print("output:\n", result.detach().numpy())
+        logger.log(logging.SHOWFUNC, name + " is done !!!!\n")
+        return result
+    
+    @functools.wraps(func)
     def newFunc(*args, **kwds):
         flops, macs = funcFlopCompute(*args, **kwds)
         if module_flop_count:
             module_flop_count[-1].append((name, flops))
         if module_mac_count and macs:
             module_mac_count[-1].append((name, macs))
-        return oldFunc(*args, **kwds)
+        return func(*args, **kwds)
 
-    newFunc.__name__ = func.__name__
+    return newFuncLogging if logger.level == logging.SHOWFUNC else newFunc
+
+def wrapWarning(func):
+    name = func.__name__
+    if inspect.isfunction(func) or inspect.isbuiltin(func):
+        old_functions[(func.__module__, name)] = func
+    elif inspect.ismethod(func):
+        try:
+            old_functions[(func.__objclass__, name)] = func
+        except AttributeError:
+            logger.error("{} is not correct wrapped".format(func))
+
+    @functools.wraps(func)
+    def newFunc(*args, **kwds):
+        logger.warning("forward an unimplemented function: {}".format(name))
+        return func(*args, **kwds)
 
     return newFunc
 
+# for checking unimplemented part in function level
+def _check_function_level_patch(pytorch_module):
+    count = 0
+    overridable_functions = torch.overrides.get_overridable_functions()[pytorch_module]
+    for name in dir(pytorch_module):
+        func = getattr(pytorch_module, name)
+        if (
+            (
+                func in overridable_functions or # exclude func from typing
+                not pytorch_module.__name__.startswith("torch.")
+            ) and 
+            hasattr(func, "__call__") and
+            not (func.__module__, name) in old_functions
+        ):
+            count += 1
+            # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
+            logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
+            setattr(pytorch_module, name, wrapWarning(func))
+    
+    logger.info("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
+    
+def _check_operator_level_patch(pytorch_module):
+    count = 0
+    overridable_functions = torch.overrides.get_overridable_functions()[pytorch_module]
+    for name in dir(pytorch_module):
+        func = getattr(pytorch_module, name)
+        if (
+            (
+                func in overridable_functions or # exclude func from typing
+                not pytorch_module.__name__.startswith("torch.")
+            ) and 
+            hasattr(func, "__call__") and
+            not (func.__module__, name) in old_functions
+        ):
+            count += 1
+            # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
+            logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
+            setattr(pytorch_module, name, wrapWarning(func))
+    
+    logger.info("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
+ 
+def _patch_torch():
+    # functional level
+    _patch_fft()# 16
+    _patch_nn_functionals()# 74
+    _patch_linalg()# 26
+    _patch_special()# 11
+    
+    # operator level
+    _patch_tensor_methods()
+    
+def _patch_torchvision():
+    # TODO: finish it (ops, torch, transforms), make it optional
+    pass
+ 
+def _patch_torchaudio():# 42
+    # TODO: finish it (functional), make it optional
+    _check_function_level_patch(torchaudio.functional)
+    pass
+    
+def _patch_fft():
+    # TODO: finish it
+    _check_function_level_patch(torch.fft)
 
-def _patch_functionals():
+def _patch_nn_functionals():
     # FC
     F.linear = wrapFunc(F.linear, _linear_flops_compute)
 
@@ -853,11 +1033,23 @@ def _patch_functionals():
 
     # embedding
     F.embedding = wrapFunc(F.embedding, _embedding_flops_compute)
+    
+    # not implemented
+    _check_function_level_patch(F)
 
+def _patch_linalg():
+    # TODO: finish it
+    _check_function_level_patch(torch.linalg)
+    
+def _patch_special():
+    # TODO: finish it
+    _check_function_level_patch(torch.special)
 
 def _patch_tensor_methods():
     torch.matmul = wrapFunc(torch.matmul, _matmul_flops_compute)
     torch.Tensor.matmul = wrapFunc(torch.Tensor.matmul, _matmul_flops_compute)
+    torch.Tensor.__matmul__ = wrapFunc(torch.Tensor.__matmul__, _matmul_flops_compute)
+    
     torch.mm = wrapFunc(torch.mm, _matmul_flops_compute)
     torch.Tensor.mm = wrapFunc(torch.Tensor.mm, _matmul_flops_compute)
     torch.bmm = wrapFunc(torch.bmm, _matmul_flops_compute)
@@ -865,51 +1057,141 @@ def _patch_tensor_methods():
 
     torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
+    
+    ops = ["add", "sub", "mul", "div", "truediv", "pow"]
+    for op in ops:
+        # syntax sugar
+        sugar_op = "__{}__".format(op)
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+        
+        if op == "pow": # since __rpow__, __pow__ just torch.pow
+            funcFlopCompute = _zero_flops_compute
+        else:
+            funcFlopCompute = _elementwise_flops_compute
+        # inverse syntax sugar
+        sugar_op = "__i{}__".format(op)
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), funcFlopCompute))
+        # raw syntax sugar
+        sugar_op = "__r{}__".format(op)
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), funcFlopCompute))
 
-    torch.mul = wrapFunc(torch.mul, _mul_flops_compute)
-    torch.Tensor.mul = wrapFunc(torch.Tensor.mul, _mul_flops_compute)
+        # torch.op and torch.Tensor.op     
+        op = "true_divide" if op == "truediv" else op
+        setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
+        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
 
-    torch.add = wrapFunc(torch.add, _add_flops_compute)
-    torch.Tensor.add = wrapFunc(torch.Tensor.add, _add_flops_compute)
-
+    # alias
+    ops = ["subtract", "multiply", "divide"]
+    for op in ops:
+        setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
+        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
+        
+    # https://pytorch.org/docs/stable/torch.html#math-operations
+    ops = {
+        # Pointwise Ops (https://pytorch.org/docs/stable/torch.html#pointwise-ops)
+        "abs": {},
+        "absolute": {},
+        "acos": {},
+        "arccos": {},
+        "acosh": {},
+        "arccosh": {},
+        # add (implemented above)
+        # addcdiv (not implemented)
+        # addcmul (not implemented)
+        # angle (not for floating-point)
+        "asin": {},
+        "arcsin": {},
+        "asinh": {},
+        "arcsinh": {},
+        "atan": {},
+        "arctan": {},
+        "atanh": {},
+        "arctanh": {},
+        # atan2 (not implemented)
+        # arctan2 (alias)
+        # bitwise_{not, and, or, xor, left_shift, right_shift} (not for floating-point)
+        "ceil": {},
+        "clamp": {"flop_multiplier": 2},
+        "clip": {"flop_multiplier": 2},
+        # conj_physical (not for floating-point)
+        "copysign": {},
+        "cos": {},
+        "cosh": {},
+        "deg2rad": {},
+        # div (implemented above)
+        # divide (alias)
+        # digamma (torch.special)
+        # erf (torch.special)
+        # erfc (torch.special)
+        # erfinv (torch.special)
+        "exp": {},
+        # exp2 (torch.special)
+        # expm1 (torch.special)
+        # fake_quantize_per_channel_affine (not implemented)
+        # fake_quantize_per_tensor_affine (not implemented)
+        # fix (alias)
+        # float_power (not implemented)
+        "floor": {},
+        # floor_divide (deprecated)
+        # fmod (not implemented)
+        "frac": {"flop_multiplier": 4}, # sub, abs, floor, sgn
+        # TODO: check below
+        "lgamma": {"flop_multiplier": 3}, # ln, gamma, abs
+        "log": {},
+        "log10": {},
+        "log1p": {},
+        "log2": {},
+        "reciprocal": {},
+        "round": {},
+        "rsqrt": {"flop_multiplier": 2}, # sqrt, reciprocal
+        "sigmoid": {"flop_multiplier": 2}, # add, exp, sub, reciprocal
+        "sin": {},
+        "sinc": {},
+        "sinh": {},
+        "sqrt": {},
+        "square": {},
+        "tan": {},
+        "tanh": {},
+        "trunc": {"flop_multiplier": 3}, # abs, floor, sgn
+        # Reduction Ops (https://pytorch.org/docs/stable/torch.html#reduction-ops)
+        "mean": {"flop_multiplier": 1, "flop_bias": 0},
+        "sum": {"flop_multiplier": 1, "flop_bias": -1},
+        "var": {"flop_multiplier": 4, "flop_bias": 0, "has_correction": True},# mean(N), sub(N), pow(N), sum(N-1), avg(1)
+        "var_mean": {"flop_multiplier": 4, "flop_bias": 0, "has_correction": True},
+        "std": {"flop_multiplier": 4, "flop_bias": 1, "has_correction": True},
+        "std_mean": {"flop_multiplier": 4, "flop_bias": 1, "has_correction": True},
+    }
+    
+    not_in_tensor = {"var_mean", "std_mean"}
+    
+    for op in ops:
+        funcFlopCompute = _unary_flops_compute_generator(
+            flop_multiplier=ops[op].get("flop_multiplier", 1),
+            flop_bias=ops[op].get("flop_bias", 0),
+            has_correction=ops[op].get("has_correction", False)
+        )
+        # torch.op
+        setattr(torch, op, wrapFunc(getattr(torch, op), funcFlopCompute))
+        # torch.Tensor.op
+        if op in not_in_tensor:
+            continue
+        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), funcFlopCompute))
+        
+    
     torch.einsum = wrapFunc(torch.einsum, _einsum_flops_compute)
+    
+    # _check_operator_level_patch(torch)
+    # _check_operator_level_patch(torch.Tensor)
 
 
 def _reload_functionals():
-    # torch.nn.functional does not support importlib.reload()
-    F.linear = old_functions[F.linear.__name__]
-    F.conv1d = old_functions[F.conv1d.__name__]
-    F.conv2d = old_functions[F.conv2d.__name__]
-    F.conv3d = old_functions[F.conv3d.__name__]
-    F.conv_transpose1d = old_functions[F.conv_transpose1d.__name__]
-    F.conv_transpose2d = old_functions[F.conv_transpose2d.__name__]
-    F.conv_transpose3d = old_functions[F.conv_transpose3d.__name__]
-    F.relu = old_functions[F.relu.__name__]
-    F.prelu = old_functions[F.prelu.__name__]
-    F.elu = old_functions[F.elu.__name__]
-    F.leaky_relu = old_functions[F.leaky_relu.__name__]
-    F.relu6 = old_functions[F.relu6.__name__]
-    F.batch_norm = old_functions[F.batch_norm.__name__]
-    F.avg_pool1d = old_functions[F.avg_pool1d.__name__]
-    F.avg_pool2d = old_functions[F.avg_pool2d.__name__]
-    F.avg_pool3d = old_functions[F.avg_pool3d.__name__]
-    F.max_pool1d = old_functions[F.max_pool1d.__name__]
-    F.max_pool2d = old_functions[F.max_pool2d.__name__]
-    F.max_pool3d = old_functions[F.max_pool3d.__name__]
-    F.adaptive_avg_pool1d = old_functions[F.adaptive_avg_pool1d.__name__]
-    F.adaptive_avg_pool2d = old_functions[F.adaptive_avg_pool2d.__name__]
-    F.adaptive_avg_pool3d = old_functions[F.adaptive_avg_pool3d.__name__]
-    F.adaptive_max_pool1d = old_functions[F.adaptive_max_pool1d.__name__]
-    F.adaptive_max_pool2d = old_functions[F.adaptive_max_pool2d.__name__]
-    F.adaptive_max_pool3d = old_functions[F.adaptive_max_pool3d.__name__]
-    F.upsample = old_functions[F.upsample.__name__]
-    F.interpolate = old_functions[F.interpolate.__name__]
-    F.softmax = old_functions[F.softmax.__name__]
-    F.embedding = old_functions[F.embedding.__name__]
+    for name in dir(F):
+        if name in old_functions:
+            setattr(F, name, old_functions[(F.__name__, name)])
 
 
 def _reload_tensor_methods():
-    torch.matmul = old_functions[torch.matmul.__name__]
+    torch.matmul = old_functions[(None, torch.matmul.__name__)]
 
 
 def _rnn_flops(flops, rnn_module, w_ih, w_hh, input_size):
@@ -992,119 +1274,37 @@ MODULE_HOOK_MAPPING = {
     nn.GRUCell: _rnn_cell_forward_hook,
 }
 
+def _num_to_string(num, units=None, precision=2, unit="", order_names=["", "K", "M", "G", "T"], bias=0):
+    order = int(min(max(np.log10(num)/3 + bias if num else 0, 0), len(order_names)-1))
+        
+    num *= 1000**(bias-order)
+    if units is None:
+        units = order_names[order] + unit
+    
+    return str(round(num, precision)) + " " + units
 
 def num_to_string(num, precision=2):
-    if num // 10**9 > 0:
-        return str(round(num / 10.0**9, precision)) + " G"
-    elif num // 10**6 > 0:
-        return str(round(num / 10.0**6, precision)) + " M"
-    elif num // 10**3 > 0:
-        return str(round(num / 10.0**3, precision)) + " K"
-    else:
-        return str(num)
+    return _num_to_string(num, precision=precision, order_names=["", "K", "M", "G"])
 
 
 def macs_to_string(macs, units=None, precision=2):
-    if units is None:
-        if macs // 10**9 > 0:
-            return str(round(macs / 10.0**9, precision)) + " GMACs"
-        elif macs // 10**6 > 0:
-            return str(round(macs / 10.0**6, precision)) + " MMACs"
-        elif macs // 10**3 > 0:
-            return str(round(macs / 10.0**3, precision)) + " KMACs"
-        else:
-            return str(macs) + " MACs"
-    else:
-        if units == "GMACs":
-            return str(round(macs / 10.0**9, precision)) + " " + units
-        elif units == "MMACs":
-            return str(round(macs / 10.0**6, precision)) + " " + units
-        elif units == "KMACs":
-            return str(round(macs / 10.0**3, precision)) + " " + units
-        else:
-            return str(macs) + " MACs"
+    return _num_to_string(macs, units=units, precision=precision, unit="MACs")
 
 
 def number_to_string(num, units=None, precision=2):
-    if units is None:
-        if num // 10**9 > 0:
-            return str(round(num / 10.0**9, precision)) + " G"
-        elif num // 10**6 > 0:
-            return str(round(num / 10.0**6, precision)) + " M"
-        elif num // 10**3 > 0:
-            return str(round(num / 10.0**3, precision)) + " K"
-        else:
-            return str(num) + " "
-    else:
-        if units == "G":
-            return str(round(num / 10.0**9, precision)) + " " + units
-        elif units == "M":
-            return str(round(num / 10.0**6, precision)) + " " + units
-        elif units == "K":
-            return str(round(num / 10.0**3, precision)) + " " + units
-        else:
-            return str(num) + " "
+    return _num_to_string(num, units=units, precision=precision)
 
 
 def flops_to_string(flops, units=None, precision=2):
-    if units is None:
-        if flops // 10**12 > 0:
-            return str(round(flops / 10.0**12, precision)) + " TFLOPS"
-        if flops // 10**9 > 0:
-            return str(round(flops / 10.0**9, precision)) + " GFLOPS"
-        elif flops // 10**6 > 0:
-            return str(round(flops / 10.0**6, precision)) + " MFLOPS"
-        elif flops // 10**3 > 0:
-            return str(round(flops / 10.0**3, precision)) + " KFLOPS"
-        else:
-            return str(flops) + " FLOPS"
-    else:
-        if units == "TFLOPS":
-            return str(round(flops / 10.0**12, precision)) + " " + units
-        if units == "GFLOPS":
-            return str(round(flops / 10.0**9, precision)) + " " + units
-        elif units == "MFLOPS":
-            return str(round(flops / 10.0**6, precision)) + " " + units
-        elif units == "KFLOPS":
-            return str(round(flops / 10.0**3, precision)) + " " + units
-        else:
-            return str(flops) + " FLOPS"
+    return _num_to_string(flops, units=units, precision=precision, unit="FLOPs")
 
 
 def params_to_string(params_num, units=None, precision=2):
-    if units is None:
-        if params_num // 10**6 > 0:
-            return str(round(params_num / 10**6, 2)) + " M"
-        elif params_num // 10**3:
-            return str(round(params_num / 10**3, 2)) + " k"
-        else:
-            return str(params_num)
-    else:
-        if units == "M":
-            return str(round(params_num / 10.0**6, precision)) + " " + units
-        elif units == "K":
-            return str(round(params_num / 10.0**3, precision)) + " " + units
-        else:
-            return str(params_num)
+    return _num_to_string(params_num, units=units, precision=precision, order_names=["", "k", "M", "G"])
 
 
 def duration_to_string(duration, units=None, precision=2):
-    if units is None:
-        if duration > 1:
-            return str(round(duration, precision)) + " s"
-        elif duration * 10**3 > 1:
-            return str(round(duration * 10**3, precision)) + " ms"
-        elif duration * 10**6 > 1:
-            return str(round(duration * 10**6, precision)) + " us"
-        else:
-            return str(duration)
-    else:
-        if units == "us":
-            return str(round(duration * 10.0**6, precision)) + " " + units
-        elif units == "ms":
-            return str(round(duration * 10.0**3, precision)) + " " + units
-        else:
-            return str(round(duration, precision)) + " s"
+    return _num_to_string(duration, units=units, precision=precision, order_names=["n", "u", "m", ""], bias=3, unit="s")
 
 
     # can not iterate over all submodules using self.model.modules()
@@ -1146,6 +1346,7 @@ def get_model_profile(
     as_string=True,
     output_file=None,
     ignore_modules=None,
+    show_untracked=False,
 ):
     """Returns the total floating-point operations, MACs, and parameters of a model.
 
@@ -1175,7 +1376,7 @@ def get_model_profile(
         The number of floating-point operations, multiply-accumulate operations (MACs), and parameters in the model.
     """
     assert isinstance(model, nn.Module), "model must be a PyTorch module"
-    prof = FlopsProfiler(model)
+    prof = FlopsProfiler(model, show_untracked=show_untracked)
     model.eval()
 
     if input_shape is not None:
@@ -1210,7 +1411,9 @@ def get_model_profile(
                                  module_depth=module_depth,
                                  top_modules=top_modules,
                                  detailed=detailed,
-                                 output_file=output_file)
+                                 output_file=output_file,
+                                 device=args[0][0].device,
+                                 input_shape=input_shape)
 
     prof.end_profile()
     if as_string:
