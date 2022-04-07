@@ -9,7 +9,7 @@ import torch.nn as nn
 
 from config.scalerop import syntax_sugar_scalerop_test, torch_scalerop_test, torch_tensor_scalerop_test
 from config.tensorop import tensorop_test
-from config.unaryop import torch_unaryop_test
+from config.mathop import torch_math_reduction_correctionop_test, torch_math_pointwiseop_test
 
 all_variables = dir()
 
@@ -67,9 +67,9 @@ class UnitsModel(nn.Module):
             for args_cmb in itertools.product(*self.test_config["args"].values()):
                 args_cmb = dict(zip(self.test_config["args"].keys(), args_cmb))
                 # check the arg combination is valid
-                if hasattr(module, "check_args_valid"):
-                    if not module.check_args_valid(input_shape=self.test_config["input_shape"], **args_cmb):
-                        continue
+                if (hasattr(module, "check_args_valid") and
+                   not module.check_args_valid(input_shape=self.test_config["input_shape"], **args_cmb)):
+                    continue
                 blocks.append(module(**args_cmb))
                 blocks[-1].__name__ = "_".join(map(lambda x: str(x), args_cmb.values()))
             
