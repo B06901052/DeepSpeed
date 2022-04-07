@@ -386,7 +386,6 @@ class FlopsProfiler(object):
                 "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
                                         total_duration))
             items.append(flops_to_string(flops).lower())
-            items.append(flops_to_string(flops).lower())
             items.append(flops_to_string(0.0 if duration == 0 else flops / duration))
             items.append(module.original_extra_repr())
             return ", ".join(items)
@@ -451,14 +450,11 @@ class FlopsProfiler(object):
             if curr_depth not in info:
                 info[curr_depth] = {}
             if module.__class__.__name__ not in info[curr_depth]:
-                info[curr_depth][module.__class__.__name__] = [
-                    0,
-                    0,
-                    0,
-                ]  # macs, params, time
+                info[curr_depth][module.__class__.__name__] = [0, 0, 0, 0]  # macs, params, time, flops
             info[curr_depth][module.__class__.__name__][0] += get_module_macs(module)
             info[curr_depth][module.__class__.__name__][1] += module.__params__
             info[curr_depth][module.__class__.__name__][2] += get_module_duration(module)
+            info[curr_depth][module.__class__.__name__][3] += get_module_flops(module)
             has_children = len(module._modules.items()) != 0
             if has_children:
                 for child in module.children():
@@ -498,10 +494,18 @@ class FlopsProfiler(object):
                             key=lambda item: item[1][2],
                             reverse=True)[:num_items]
             }
+            sort_flops = {
+                k: flops_to_string(v[3]).lower()
+                for k,
+                v in sorted(info[d].items(),
+                            key=lambda item: item[1][3],
+                            reverse=True)[:num_items]
+            }
 
             print(f"depth {d}:")
             print(f"    params      - {sort_params}")
             print(f"    MACs        - {sort_macs}")
+            print(f"    flops       - {sort_flops}")
             print(f"    fwd latency - {sort_time}")
 
 
@@ -814,6 +818,43 @@ def _elementwise_flops_compute(input, other, *args, **kwargs):
         flops = _prod(final_shape)
         return flops, 0
 
+def _unary_flops_compute_generator(flop_multiplier=1, flop_bias=0, macs_multiplier=1, macs_bias=0, has_correction=False):
+    def _unary_flops_compute(input, *args, **kwargs):
+        dim = kwargs.get("dim", -1)
+        # var, std, var_mean
+        biased = (
+            kwargs.get("correction") is None and
+            not kwargs.get("unbiased", False)
+        )
+        biased |= (
+            kwargs.get("unbiased") is None and
+            kwargs.get("correction") is not None and
+            kwargs.get("correction", 0) > 0
+        )
+        biased &= has_correction
+        
+        op_num, other_num = 1, 1
+        if dim == -1:
+            op_num = _prod(input.shape)
+             
+        elif type(dim) == int:
+            op_num = input.shape[dim]
+            other_num = _prod(input.shape) // op_num
+        
+        elif type(dim) == tuple:
+            for i in range(input.dim()):
+                if i in dim:
+                    op_num *= input.shape[i]
+                else:
+                    other_num *= input.shape[i]
+            
+        else:
+            raise NotImplementedError
+
+        return other_num * (flop_multiplier * op_num + flop_bias + biased), 0
+    
+    return _unary_flops_compute
+
 
 def wrapFunc(func, funcFlopCompute):
     name = func.__name__
@@ -876,7 +917,27 @@ def wrapWarning(func):
     return newFunc
 
 # for checking unimplemented part in function level
-def _check_func_level_patch(pytorch_module):
+def _check_function_level_patch(pytorch_module):
+    count = 0
+    overridable_functions = torch.overrides.get_overridable_functions()[pytorch_module]
+    for name in dir(pytorch_module):
+        func = getattr(pytorch_module, name)
+        if (
+            (
+                func in overridable_functions or # exclude func from typing
+                not pytorch_module.__name__.startswith("torch.")
+            ) and 
+            hasattr(func, "__call__") and
+            not (func.__module__, name) in old_functions
+        ):
+            count += 1
+            # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
+            logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
+            setattr(pytorch_module, name, wrapWarning(func))
+    
+    logger.info("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
+    
+def _check_operator_level_patch(pytorch_module):
     count = 0
     overridable_functions = torch.overrides.get_overridable_functions()[pytorch_module]
     for name in dir(pytorch_module):
@@ -898,10 +959,10 @@ def _check_func_level_patch(pytorch_module):
  
 def _patch_torch():
     # functional level
-    _patch_fft()
-    _patch_nn_functionals()
-    _patch_linalg()
-    _patch_special()
+    _patch_fft()# 16
+    _patch_nn_functionals()# 74
+    _patch_linalg()# 26
+    _patch_special()# 11
     
     # operator level
     _patch_tensor_methods()
@@ -910,14 +971,14 @@ def _patch_torchvision():
     # TODO: finish it (ops, torch, transforms), make it optional
     pass
  
-def _patch_torchaudio():
+def _patch_torchaudio():# 42
     # TODO: finish it (functional), make it optional
-    _check_func_level_patch(torchaudio.functional)
+    _check_function_level_patch(torchaudio.functional)
     pass
     
 def _patch_fft():
     # TODO: finish it
-    _check_func_level_patch(torch.fft)
+    _check_function_level_patch(torch.fft)
 
 def _patch_nn_functionals():
     # FC
@@ -974,15 +1035,15 @@ def _patch_nn_functionals():
     F.embedding = wrapFunc(F.embedding, _embedding_flops_compute)
     
     # not implemented
-    _check_func_level_patch(F)
+    _check_function_level_patch(F)
 
 def _patch_linalg():
     # TODO: finish it
-    _check_func_level_patch(torch.linalg)
+    _check_function_level_patch(torch.linalg)
     
 def _patch_special():
     # TODO: finish it
-    _check_func_level_patch(torch.special)
+    _check_function_level_patch(torch.special)
 
 def _patch_tensor_methods():
     torch.matmul = wrapFunc(torch.matmul, _matmul_flops_compute)
@@ -999,31 +1060,128 @@ def _patch_tensor_methods():
     
     ops = ["add", "sub", "mul", "div", "truediv", "pow"]
     for op in ops:
-        if op != "truediv":
-            setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
-            setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
-        else:
-            setattr(torch, "true_divide", wrapFunc(getattr(torch, "true_divide"), _elementwise_flops_compute))
-            setattr(torch.Tensor, "true_divide", wrapFunc(getattr(torch.Tensor, "true_divide"), _elementwise_flops_compute))
+        # syntax sugar
+        sugar_op = "__{}__".format(op)
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
         
-        if op != "pow": # since __rpow__, __pow__ just torch.pow
-            sugar_op = "__{}__".format(op)
-            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
-            sugar_op = "__i{}__".format(op)
-            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
-            sugar_op = "__r{}__".format(op)
-            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+        if op == "pow": # since __rpow__, __pow__ just torch.pow
+            funcFlopCompute = _zero_flops_compute
         else:
-            sugar_op = "__{}__".format(op)
-            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
-            sugar_op = "__i{}__".format(op)
-            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _zero_flops_compute))
-            sugar_op = "__r{}__".format(op)
-            setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _zero_flops_compute))
+            funcFlopCompute = _elementwise_flops_compute
+        # inverse syntax sugar
+        sugar_op = "__i{}__".format(op)
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), funcFlopCompute))
+        # raw syntax sugar
+        sugar_op = "__r{}__".format(op)
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), funcFlopCompute))
+
+        # torch.op and torch.Tensor.op     
+        op = "true_divide" if op == "truediv" else op
+        setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
+        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
+
+    # alias
+    ops = ["subtract", "multiply", "divide"]
+    for op in ops:
+        setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
+        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
+        
+    # https://pytorch.org/docs/stable/torch.html#math-operations
+    ops = {
+        # Pointwise Ops (https://pytorch.org/docs/stable/torch.html#pointwise-ops)
+        "abs": {},
+        "absolute": {},
+        "acos": {},
+        "arccos": {},
+        "acosh": {},
+        "arccosh": {},
+        # add (implemented above)
+        # addcdiv (not implemented)
+        # addcmul (not implemented)
+        # angle (not for floating-point)
+        "asin": {},
+        "arcsin": {},
+        "asinh": {},
+        "arcsinh": {},
+        "atan": {},
+        "arctan": {},
+        "atanh": {},
+        "arctanh": {},
+        # atan2 (not implemented)
+        # arctan2 (alias)
+        # bitwise_{not, and, or, xor, left_shift, right_shift} (not for floating-point)
+        "ceil": {},
+        "clamp": {"flop_multiplier": 2},
+        "clip": {"flop_multiplier": 2},
+        # conj_physical (not for floating-point)
+        "copysign": {},
+        "cos": {},
+        "cosh": {},
+        "deg2rad": {},
+        # div (implemented above)
+        # divide (alias)
+        # digamma (torch.special)
+        # erf (torch.special)
+        # erfc (torch.special)
+        # erfinv (torch.special)
+        "exp": {},
+        # exp2 (torch.special)
+        # expm1 (torch.special)
+        # fake_quantize_per_channel_affine (not implemented)
+        # fake_quantize_per_tensor_affine (not implemented)
+        # fix (alias)
+        # float_power (not implemented)
+        "floor": {},
+        # floor_divide (deprecated)
+        # fmod (not implemented)
+        "frac": {"flop_multiplier": 4}, # sub, abs, floor, sgn
+        # TODO: check below
+        "lgamma": {"flop_multiplier": 3}, # ln, gamma, abs
+        "log": {},
+        "log10": {},
+        "log1p": {},
+        "log2": {},
+        "reciprocal": {},
+        "round": {},
+        "rsqrt": {"flop_multiplier": 2}, # sqrt, reciprocal
+        "sigmoid": {"flop_multiplier": 2}, # add, exp, sub, reciprocal
+        "sin": {},
+        "sinc": {},
+        "sinh": {},
+        "sqrt": {},
+        "square": {},
+        "tan": {},
+        "tanh": {},
+        "trunc": {"flop_multiplier": 3}, # abs, floor, sgn
+        # Reduction Ops (https://pytorch.org/docs/stable/torch.html#reduction-ops)
+        "mean": {"flop_multiplier": 1, "flop_bias": 0},
+        "sum": {"flop_multiplier": 1, "flop_bias": -1},
+        "var": {"flop_multiplier": 4, "flop_bias": 0, "has_correction": True},# mean(N), sub(N), pow(N), sum(N-1), avg(1)
+        "var_mean": {"flop_multiplier": 4, "flop_bias": 0, "has_correction": True},
+        "std": {"flop_multiplier": 4, "flop_bias": 1, "has_correction": True},
+        "std_mean": {"flop_multiplier": 4, "flop_bias": 1, "has_correction": True},
+    }
     
+    not_in_tensor = {"var_mean", "std_mean"}
     
+    for op in ops:
+        funcFlopCompute = _unary_flops_compute_generator(
+            flop_multiplier=ops[op].get("flop_multiplier", 1),
+            flop_bias=ops[op].get("flop_bias", 0),
+            has_correction=ops[op].get("has_correction", False)
+        )
+        # torch.op
+        setattr(torch, op, wrapFunc(getattr(torch, op), funcFlopCompute))
+        # torch.Tensor.op
+        if op in not_in_tensor:
+            continue
+        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), funcFlopCompute))
+        
     
     torch.einsum = wrapFunc(torch.einsum, _einsum_flops_compute)
+    
+    # _check_operator_level_patch(torch)
+    # _check_operator_level_patch(torch.Tensor)
 
 
 def _reload_functionals():
