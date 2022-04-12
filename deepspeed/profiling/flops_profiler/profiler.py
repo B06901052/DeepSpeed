@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
-import torchvision
 from collections import OrderedDict
 import numpy as np
 
@@ -28,12 +27,94 @@ Tensor = torch.Tensor
 module_flop_count = []
 module_mac_count = []
 
-# FIXME: should consider two funcions from diff. modules while their names are the same.
 # Here lists the functions which have not to been counted.
 old_functions = {
-    ("torch.nn.functional", "dropout"): F.dropout,
-    ("torch.nn.functional", "dropout2d"): F.dropout2d,
-    ("torch.nn.functional", "dropout3d"): F.dropout3d,
+    ("torch.nn.functional", "dropout"): None,
+    ("torch.nn.functional", "dropout2d"): None,
+    ("torch.nn.functional", "dropout3d"): None,
+    ("torch.nn.functional", "split"): None,
+    (torch._C._TensorBase, "__bool__"): None,
+    (torch._C._TensorBase, "__index__"): None,
+    (torch._C._TensorBase, "__getitem__"): None,
+    (torch._C._TensorBase, "__setitem__"): None,
+    (torch._C._TensorBase, "__invert__"): None,
+    (torch._C._TensorBase, "__eq__"): None,
+    (torch._C._TensorBase, "__ge__"): None,
+    (torch._C._TensorBase, "__gt__"): None,
+    (torch._C._TensorBase, "__le__"): None,
+    (torch._C._TensorBase, "__lt__"): None,
+    (torch._C._TensorBase, "__ne__"): None,
+    (torch._C._TensorBase, "contiguous"): None,
+    # assign
+    (torch._C._TensorBase, "masked_fill"): None,
+    (torch._C._TensorBase, "masked_fill_"): None,
+    (torch._C._TensorBase, "fill"): None,
+    (torch._C._TensorBase, "fill_"): None,
+    # info
+    (torch._C._TensorBase, "dim"): None,
+    (torch._C._TensorBase, "shape"): None,
+    (torch._C._TensorBase, "size"): None,
+    # device
+    (torch._C._TensorBase, "to"): None,
+    (torch._C._TensorBase, "cpu"): None,
+    (torch._C._TensorBase, "cuda"): None,
+    # type conversion
+    (torch._C._TensorBase, "type_as"): None,
+    (torch._C._TensorBase, "float"): None,
+    (torch._C._TensorBase, "double"): None,
+    (torch._C._TensorBase, "long"): None,
+    (torch._C._TensorBase, "bool"): None,
+    (torch._C._TensorBase, "tolist"): None,
+    (torch._C._TensorBase, "numpy"): None,
+    # view or reshape
+    (torch._C._TensorBase, "view"): None,
+    (torch._C._TensorBase, "expand"): None,
+    (torch._C._TensorBase, "repeat"): None,
+    (torch._C._TensorBase, "as_strided"): None,
+    ("torch._tensor", "__len__"): None,
+    ("torch._tensor", "split"): None,
+    # comparison
+    (None, "eq"): None,
+    (None, "ge"): None,
+    (None, "gt"): None,
+    (None, "le"): None,
+    (None, "lt"): None,
+    (None, "ne"): None,
+    (None, "where"): None,
+    # comparison alias
+    (None, "greater_equal"): None,
+    (None, "greater"): None,
+    (None, "less_equal"): None,
+    (None, "less"): None,
+    (None, "not_equal"): None,
+    # normalization, see QA.md for more detail
+    (None, "batch_norm"): None,
+    (None, "group_norm"): None,
+    (None, "instance_norm"): None,
+    (None, "layer_norm"): None,
+    # shape-related
+    (None, "cat"): None,
+    (None, "stack"): None,
+    (None, "vstack"): None,
+    (None, "hstack"): None,
+    (None, "sstack"): None,
+    (None, "row_stack"): None,
+    (None, "column_stack"): None,
+    (None, "slice"): None,
+    (None, "chunk"): None,
+    # creation
+    (None, "empty_like"): None,
+    (None, "full_like"): None,
+    (None, "ones_like"): None,
+    (None, "randn_like"): None,
+    (None, "zeros_like"): None,
+    # info
+    (None, "numel"): None,
+    # other
+    (None, "embedding"): None,
+    # already been counted somewhere (unless you directly call it)
+    (None, "relu"): None,
+    (None, "softmax"): None,
 }
 
 
@@ -899,18 +980,24 @@ def wrapFunc(func, funcFlopCompute):
     return newFuncLogging if logger.level == logging.SHOWFUNC else newFunc
 
 def wrapWarning(func):
+    display_module_name = {
+        None: "torch",
+        torch._C._TensorBase: "torch.Tensor",
+    }
+    module = getattr(func, "__module__", None)
+    module = getattr(func, "__objclass__", None) if module is None else module
     name = func.__name__
-    if inspect.isfunction(func) or inspect.isbuiltin(func):
-        old_functions[(func.__module__, name)] = func
-    elif inspect.ismethod(func):
-        try:
-            old_functions[(func.__objclass__, name)] = func
-        except AttributeError:
-            logger.error("{} is not correct wrapped".format(func))
+    if (module, name) in old_functions:
+        if func == old_functions[(module, name)]:
+            return old_functions[(module, name)]
+        else:
+            raise RuntimeError("duplicate wrapWarning at {}.{}".format(display_module_name.get(module, module), name))
+    old_functions[(module, name)] = func
+
 
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        logger.warning("forward an unimplemented function: {}".format(name))
+        logger.warning("forward an unimplemented function: {}.{}".format(display_module_name.get(module, module), name))
         return func(*args, **kwds)
 
     return newFunc
@@ -939,18 +1026,13 @@ def _check_function_level_patch(pytorch_module):
 def _check_operator_level_patch(pytorch_module):
     count = 0
     overridable_functions = torch.overrides.get_overridable_functions()[pytorch_module]
-    for name in dir(pytorch_module):
-        func = getattr(pytorch_module, name)
+    for func, name in map(lambda x: (x, x.__name__), overridable_functions):
         if (
-            (
-                func in overridable_functions or # exclude func from typing
-                not pytorch_module.__name__.startswith("torch.")
-            ) and 
             hasattr(func, "__call__") and
-            not (func.__module__, name) in old_functions
+            not (getattr(func, "__module__", None), name) in old_functions and
+            not (getattr(func, "__objclass__", None), name) in old_functions
         ):
             count += 1
-            # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
             logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
             setattr(pytorch_module, name, wrapWarning(func))
     
@@ -1005,7 +1087,7 @@ def _patch_nn_functionals():
 
     # Normalizations
     F.batch_norm = wrapFunc(F.batch_norm, _batch_norm_flops_compute)
-    F.layer_norm = wrapFunc(F.layer_norm, _layer_norm_flops_compute)
+    F.layer_norm = wrapFunc(F.layer_norm, _layer_norm_flops_compute)    
     F.instance_norm = wrapFunc(F.instance_norm, _instance_norm_flops_compute)
     F.group_norm = wrapFunc(F.group_norm, _group_norm_flops_compute)
 
@@ -1057,6 +1139,7 @@ def _patch_tensor_methods():
     torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
     
+    # TODO: floordiv
     ops = ["add", "sub", "mul", "div", "truediv", "pow"]
     for op in ops:
         # syntax sugar
@@ -1086,7 +1169,7 @@ def _patch_tensor_methods():
         setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
         
     # https://pytorch.org/docs/stable/torch.html#math-operations
-    ops = {
+    math_ops = {
         # Pointwise Ops (https://pytorch.org/docs/stable/torch.html#pointwise-ops)
         "abs": {},
         "absolute": {},
@@ -1163,11 +1246,11 @@ def _patch_tensor_methods():
     
     not_in_tensor = {"var_mean", "std_mean"}
     
-    for op in ops:
+    for op in math_ops:
         funcFlopCompute = _unary_flops_compute_generator(
-            flop_multiplier=ops[op].get("flop_multiplier", 1),
-            flop_bias=ops[op].get("flop_bias", 0),
-            has_correction=ops[op].get("has_correction", False)
+            flop_multiplier=math_ops[op].get("flop_multiplier", 1),
+            flop_bias=math_ops[op].get("flop_bias", 0),
+            has_correction=math_ops[op].get("has_correction", False)
         )
         # torch.op
         setattr(torch, op, wrapFunc(getattr(torch, op), funcFlopCompute))
@@ -1179,14 +1262,15 @@ def _patch_tensor_methods():
     
     torch.einsum = wrapFunc(torch.einsum, _einsum_flops_compute)
     
-    # _check_operator_level_patch(torch)
-    # _check_operator_level_patch(torch.Tensor)
+    _check_operator_level_patch(torch)
+    _check_operator_level_patch(torch.Tensor)
 
-
+# TODO: finish all reload
 def _reload_functionals():
     for name in dir(F):
-        if name in old_functions:
-            setattr(F, name, old_functions[(F.__name__, name)])
+        old_func = old_functions.get(name, None)
+        if old_func is not None:
+            setattr(F, name, old_func)
 
 
 def _reload_tensor_methods():
@@ -1222,6 +1306,7 @@ def _rnn_forward_hook(rnn_module, input, output):
     flops = 0
     # input is a tuple containing a sequence to process and (optionally) hidden state
     inp = input[0]
+    # FIXME: error shoot in s3prl/apc
     batch_size = inp.shape[0]
     seq_length = inp.shape[1]
     num_layers = rnn_module.num_layers
