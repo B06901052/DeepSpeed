@@ -111,6 +111,22 @@ class Div(ScalerOpBlock):
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
 
+class FloorDiv(ScalerOpBlock):
+    inplace = True
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return self.a // inputs
+        elif self.order == "post":
+            return inputs // self.a
+        elif self.order == "inplace":
+            inputs //= self.a
+            return inputs
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+
 class Pow(ScalerOpBlock):
     def __init__(self, dtype, order):
         super().__init__(dtype, order)
@@ -235,6 +251,18 @@ class TorchTrueDiv(ScalerOpBlock):
             return torch.true_divide(self.a, inputs)
         elif self.order == "post":
             return torch.true_divide(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+        
+class TorchFloorDiv(ScalerOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.floor_divide(self.a, inputs)
+        elif self.order == "post":
+            return torch.floor_divide(inputs, self.a)
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
 
@@ -362,6 +390,18 @@ class TorchTensorTrueDiv(ScalerTensorOpBlock):
         else:
             raise NotImplementedError("undefined order {} for {}".format(self.order, self))
 
+class TorchTensorFloorDiv(ScalerTensorOpBlock):
+    def __init__(self, dtype, order):
+        super().__init__(dtype, order)
+        
+    def forward(self, inputs):
+        if self.order == "pre":
+            return torch.Tensor.floor_divide(self.a, inputs)
+        elif self.order == "post":
+            return torch.Tensor.floor_divide(inputs, self.a)
+        else:
+            raise NotImplementedError("undefined order {} for {}".format(self.order, self))
+
 class TorchTensorPow(ScalerTensorOpBlock):
     def __init__(self, dtype, order):
         super().__init__(dtype, order)
@@ -376,7 +416,7 @@ class TorchTensorPow(ScalerTensorOpBlock):
         
 syntax_sugar_scalerop_test = {
     "test_name": "syntax_sugar_scalerop_test",
-    "modules": [Add, Mul, Sub, Div, Pow],
+    "modules": [Add, Mul, Sub, Div, FloorDiv, Pow],
     "input_shape": (2, 2),
     "args": {
             "order": ["pre", "inplace", "post"],    
@@ -386,7 +426,7 @@ syntax_sugar_scalerop_test = {
 
 torch_scalerop_test = {
     "test_name": "torch_scalerop_test",
-    "modules": [TorchAdd, TorchMul, TorchMultiply, TorchSub, TorchSubtract, TorchDiv, TorchDivide, TorchTrueDiv, TorchPow],
+    "modules": [TorchAdd, TorchMul, TorchMultiply, TorchSub, TorchSubtract, TorchDiv, TorchDivide, TorchTrueDiv, TorchFloorDiv, TorchPow],
     "input_shape": (2, 2),
     "args": {
             "order": ["pre", "post"],    
@@ -396,7 +436,7 @@ torch_scalerop_test = {
 
 torch_tensor_scalerop_test = {
     "test_name": "torch_tensor_scalerop_test",
-    "modules": [TorchTensorAdd, TorchTensorMul, TorchTensorMultiply, TorchTensorSub, TorchTensorSubtract, TorchTensorDiv, TorchTensorDivide, TorchTensorTrueDiv, TorchTensorPow],
+    "modules": [TorchTensorAdd, TorchTensorMul, TorchTensorMultiply, TorchTensorSub, TorchTensorSubtract, TorchTensorDiv, TorchTensorDivide, TorchTensorTrueDiv, TorchTensorFloorDiv, TorchTensorPow],
     "input_shape": (2, 2),
     "args": {
             "order": ["pre", "post"],    
