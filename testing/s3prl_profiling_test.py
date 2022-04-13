@@ -43,7 +43,6 @@ def deepspeedProfiling(model_func, args):
         except StopIteration:
             dtype = torch.float
         inputs = s3prl_input_constructor(args.batch_size, args.seq_len, args.device, dtype)
-        # TODO: add device and dtype info into the output_file
         
         flops, macs, params = get_model_profile(
             model=model,

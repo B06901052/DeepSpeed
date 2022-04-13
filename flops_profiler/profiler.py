@@ -6,7 +6,14 @@ import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchaudio
+try:
+    import torchaudio
+except:
+    pass
+try:
+    import torchvision
+except:
+    pass
 from collections import OrderedDict
 import numpy as np
 
@@ -180,7 +187,10 @@ class FlopsProfiler(object):
         """
         self.reset_profile()
         _patch_torch()
-        _patch_torchaudio()
+        if "torchaudio" in dir():
+            _patch_torchaudio()
+        if "torchvision" in dir():
+            _patch_torchvision()
 
         def register_module_hooks(module, ignore_list):
             if ignore_list and type(module) in ignore_list:
@@ -209,7 +219,6 @@ class FlopsProfiler(object):
             module.__post_hook_handle__ = module.register_forward_hook(post_hook)
 
             def start_time_hook(module, input):
-                # TODO: 
                 torch.cuda.synchronize()
                 module.__start_time__ = time.time()
 
@@ -386,7 +395,6 @@ class FlopsProfiler(object):
         print(
             "\n-------------------------- DeepSpeed Flops Profiler --------------------------"
         )
-        # TODO (joseph Feng): add dtype, device, input shape info
         print(f'Profile Summary at step {profile_step}:')
         print(
             "Notations:\ndata parallel size (dp_size), model parallel size(mp_size),\nnumber of parameters (params), number of multiply-accumulate operations(MACs),\nnumber of floating-point operations (flops), floating-point operations per second (FLOPS),\nfwd latency (forward propagation latency), bwd latency (backward propagation latency),\nstep (weights update latency), iter latency (sum of fwd, bwd and step latency)\n"
@@ -466,6 +474,7 @@ class FlopsProfiler(object):
             duration = get_module_duration(module)
 
             # TODO: make them can be optional
+            # TODO: make precision can be changed
 
             items.append(duration_to_string(duration))
             items.append(
@@ -1149,7 +1158,6 @@ def _check_function_level_patch(pytorch_module):
             not (func.__module__, name) in old_functions
         ):
             count += 1
-            # TODO (joseph): make this be a function to show all untracked function, and not using logging.level to control, but using args
             logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
             setattr(pytorch_module, name, wrapWarning(func))
     
@@ -1181,7 +1189,9 @@ def _patch_torch():
     _patch_tensor_methods()
     
 def _patch_torchvision():
-    # TODO: finish it (ops, torch, transforms), make it optional
+    # TODO: finish it (ops, transforms), make it optional
+    _check_function_level_patch(torchvision.ops)
+    _check_function_level_patch(torchvision.transforms)
     pass
  
 def _patch_torchaudio():# 42

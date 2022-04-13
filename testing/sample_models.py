@@ -25,7 +25,6 @@ def list_all_defined_test():
             print(v)
 
 class UnitsModel(nn.Module):
-    # TODO (joseph): add matmul block
     def __init__(self, test_name="", test_config=None):
         """UnitsModel
 
