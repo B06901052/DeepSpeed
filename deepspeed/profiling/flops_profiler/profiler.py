@@ -1067,10 +1067,8 @@ def wrapFunc(func, funcFlopCompute):
     module = getattr(func, "__objclass__", None) if module is None else module
     name = func.__name__
     if (module, name) in old_functions:
-        if func == old_functions[(module, name)]:
-            return old_functions[(module, name)]
-        else:
-            raise RuntimeError("duplicate wrapFunc at {}.{}\nold func: {}\ncurrent func: {}".format(display_module_name.get(module, module), name, func, old_functions[(module, name)]))
+        if func != old_functions[(module, name)]:
+            raise RuntimeError("keys are conflict in old_functions at {}.{}\nold func: {}\ncurrent func: {}".format(display_module_name.get(module, module), name, func, old_functions[(module, name)]))
     
     old_functions[(module, name)] = func
 
@@ -1288,25 +1286,22 @@ def _patch_tensor_methods():
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
     
     # TODO: floordiv
-    ops = ["add", "sub", "mul", "div", "truediv", "pow"]
+    ops = ["add", "sub", "mul", "div", "truediv", "pow", "floordiv"]
     for op in ops:
         # syntax sugar
         sugar_op = "__{}__".format(op)
         setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
         
-        if op == "pow": # since __rpow__, __pow__ just torch.pow
-            funcFlopCompute = _zero_flops_compute
-        else:
-            funcFlopCompute = _elementwise_flops_compute
-        # inverse syntax sugar
+        # inplace syntax sugar
         sugar_op = "__i{}__".format(op)
-        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), funcFlopCompute))
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
         # raw syntax sugar
         sugar_op = "__r{}__".format(op)
-        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), funcFlopCompute))
+        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
 
         # torch.op and torch.Tensor.op     
         op = "true_divide" if op == "truediv" else op
+        op = "floor_divide" if op == "floordiv" else op
         setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
         setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
 
