@@ -27,6 +27,11 @@ Tensor = torch.Tensor
 module_flop_count = []
 module_mac_count = []
 
+display_module_name = {
+    None: "torch",
+    torch._C._TensorBase: "torch.Tensor",
+}
+
 # Here lists the functions which have not to been counted.
 old_functions = {
     ("torch.nn.functional", "dropout"): None,
@@ -937,8 +942,6 @@ def _multi_head_attention_forward_flops_compute(
     flops += 2 * n
     macs += n
 
-    import pdb; pdb.set_trace()
-
     return flops, macs
 
 
@@ -1051,15 +1054,16 @@ def _unary_flops_compute_generator(flop_multiplier=1, flop_bias=0, macs_multipli
 
 
 def wrapFunc(func, funcFlopCompute):
+    module = getattr(func, "__module__", None)
+    module = getattr(func, "__objclass__", None) if module is None else module
     name = func.__name__
-    if inspect.isfunction(func) or inspect.isbuiltin(func):
-        old_functions[(func.__module__, name)] = func
-    else:
-        try:
-            old_functions[(func.__objclass__, name)] = func
-        except AttributeError:
-            logger.error("{} is not correctly wrapped".format(func))
-        
+    if (module, name) in old_functions:
+        if func == old_functions[(module, name)]:
+            return old_functions[(module, name)]
+        else:
+            raise RuntimeError("duplicate wrapFunc at {}.{}\nold func: {}\ncurrent func: {}".format(display_module_name.get(module, module), name, func, old_functions[(module, name)]))
+    
+    old_functions[(module, name)] = func
 
     @functools.wraps(func)
     def newFuncLogging(*args, **kwds):
@@ -1077,9 +1081,17 @@ def wrapFunc(func, funcFlopCompute):
         if module_mac_count and macs:
             module_mac_count[-1].append((name, macs))
             
+        flop_len = len(module_flop_count[-1])
+        mac_len = len(module_mac_count[-1])
+            
         result = func(*args, **kwds)
+        
+        # remove redundant count
+        module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        
         print("output:\n", result.detach().numpy())
-        logger.log(logging.SHOWFUNC, name + " is done !!!!\n")
+        logger.log(logging.SHOWFUNC, name + " is done !!!!\n")      
         return result
     
     @functools.wraps(func)
@@ -1089,15 +1101,21 @@ def wrapFunc(func, funcFlopCompute):
             module_flop_count[-1].append((name, flops))
         if module_mac_count and macs:
             module_mac_count[-1].append((name, macs))
-        return func(*args, **kwds)
+            
+        flop_len = len(module_flop_count[-1])
+        mac_len = len(module_mac_count[-1])
+            
+        result = func(*args, **kwds)
+        
+        # remove redundant count
+        module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        
+        return result
 
     return newFuncLogging if logger.level == logging.SHOWFUNC else newFunc
 
 def wrapWarning(func):
-    display_module_name = {
-        None: "torch",
-        torch._C._TensorBase: "torch.Tensor",
-    }
     module = getattr(func, "__module__", None)
     module = getattr(func, "__objclass__", None) if module is None else module
     name = func.__name__
@@ -1105,13 +1123,13 @@ def wrapWarning(func):
         if func == old_functions[(module, name)]:
             return old_functions[(module, name)]
         else:
-            raise RuntimeError("duplicate wrapWarning at {}.{}".format(display_module_name.get(module, module), name))
+            raise RuntimeError("duplicate wrapWarning at {}.{}\nold func: {}\ncurrent func: {}".format(display_module_name.get(module, module), name, func, old_functions[(module, name)]))
     old_functions[(module, name)] = func
 
 
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        logger.warning("forward an unimplemented function: {}.{}".format(display_module_name.get(module, module), name))
+        logger.warning("forward an unimplemented(may be fully/partial/non counted) function: {}.{}".format(display_module_name.get(module, module), name))
         return func(*args, **kwds)
 
     return newFunc
@@ -1254,7 +1272,7 @@ def _patch_tensor_methods():
     torch.mm = wrapFunc(torch.mm, _matmul_flops_compute)
     torch.Tensor.mm = wrapFunc(torch.Tensor.mm, _matmul_flops_compute)
     torch.bmm = wrapFunc(torch.bmm, _matmul_flops_compute)
-    torch.Tensor.bmm = wrapFunc(torch.bmm, _matmul_flops_compute)
+    torch.Tensor.bmm = wrapFunc(torch.Tensor.bmm, _matmul_flops_compute)
 
     torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
