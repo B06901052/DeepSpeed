@@ -45,11 +45,27 @@ old_functions = {
     ("torch.nn.functional", "dropout2d"): None,
     ("torch.nn.functional", "dropout3d"): None,
     ("torch.nn.functional", "split"): None,
+    # type conversion
     (torch._C._TensorBase, "__bool__"): None,
+    (torch._C._TensorBase, "__int__"): None,
+    (torch._C._TensorBase, "__float__"): None,
+    # bool
+    (torch._C._TensorBase, "__and__"): None,
+    (torch._C._TensorBase, "__or__"): None,
+    (torch._C._TensorBase, "__xor__"): None,
+    (torch._C._TensorBase, "__lshift__"): None,
+    (torch._C._TensorBase, "__rshift__"): None,
+    (torch._C._TensorBase, "__iand__"): None,
+    (torch._C._TensorBase, "__ior__"): None,
+    (torch._C._TensorBase, "__ixor__"): None,
+    (torch._C._TensorBase, "__ilshift__"): None,
+    (torch._C._TensorBase, "__irshift__"): None,
+    # other
     (torch._C._TensorBase, "__index__"): None,
     (torch._C._TensorBase, "__getitem__"): None,
     (torch._C._TensorBase, "__setitem__"): None,
     (torch._C._TensorBase, "__invert__"): None,
+    (torch._C._TensorBase, "__format__"): None,
     (torch._C._TensorBase, "__eq__"): None,
     (torch._C._TensorBase, "__ge__"): None,
     (torch._C._TensorBase, "__gt__"): None,
@@ -66,6 +82,9 @@ old_functions = {
     (torch._C._TensorBase, "dim"): None,
     (torch._C._TensorBase, "shape"): None,
     (torch._C._TensorBase, "size"): None,
+    (torch._C._TensorBase, "has_names"): None,
+    (torch._C._TensorBase, "data_ptr"): None,
+    (torch._C._TensorBase, "get_device"): None,
     # device
     (torch._C._TensorBase, "to"): None,
     (torch._C._TensorBase, "cpu"): None,
@@ -78,12 +97,17 @@ old_functions = {
     (torch._C._TensorBase, "bool"): None,
     (torch._C._TensorBase, "tolist"): None,
     (torch._C._TensorBase, "numpy"): None,
+    (torch._C._TensorBase, "item"): None,
     # view or reshape
     (torch._C._TensorBase, "view"): None,
     (torch._C._TensorBase, "expand"): None,
     (torch._C._TensorBase, "repeat"): None,
     (torch._C._TensorBase, "as_strided"): None,
+    (torch._C._TensorBase, "scatter"): None,
+    (torch._C._TensorBase, "scatter_"): None,
     ("torch._tensor", "__len__"): None,
+    ("torch._tensor", "__format__"): None,
+    ("torch._tensor", "__repr__"): None,
     ("torch._tensor", "split"): None,
     # comparison
     (None, "eq"): None,
@@ -93,6 +117,7 @@ old_functions = {
     (None, "lt"): None,
     (None, "ne"): None,
     (None, "where"): None,
+    (None, "isfinite"): None,
     # comparison alias
     (None, "greater_equal"): None,
     (None, "greater"): None,
@@ -473,7 +498,7 @@ class FlopsProfiler(object):
             ]
             duration = get_module_duration(module)
 
-            # TODO: make them can be optional
+            # TODO: make items display can be optional
             # TODO: make precision can be changed
 
             items.append(duration_to_string(duration))
@@ -1187,18 +1212,18 @@ def _patch_torch():
     _patch_tensor_methods()
     
 def _patch_torchvision():
-    # TODO: finish it (ops, transforms), make it optional
+    # TODO: finish torchvision.{ops, transforms}, make it optional
     _check_function_level_patch(torchvision.ops)
     _check_function_level_patch(torchvision.transforms)
     pass
  
 def _patch_torchaudio():# 42
-    # TODO: finish it (functional), make it optional
+    # TODO: finish torchaudio.functional, make it optional
     _check_function_level_patch(torchaudio.functional)
     pass
     
 def _patch_fft():
-    # TODO: finish it
+    # TODO: finish fft
     _check_function_level_patch(torch.fft)
 
 def _patch_nn_functionals():
@@ -1265,11 +1290,11 @@ def _patch_nn_functionals():
     _check_function_level_patch(F)
 
 def _patch_linalg():
-    # TODO: finish it
+    # TODO: finish linalg
     _check_function_level_patch(torch.linalg)
     
 def _patch_special():
-    # TODO: finish it
+    # TODO: finish special
     _check_function_level_patch(torch.special)
 
 def _patch_tensor_methods():
@@ -1285,7 +1310,6 @@ def _patch_tensor_methods():
     torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
     torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
     
-    # TODO: floordiv
     ops = ["add", "sub", "mul", "div", "truediv", "pow", "floordiv"]
     for op in ops:
         # syntax sugar
@@ -1360,7 +1384,7 @@ def _patch_tensor_methods():
         # floor_divide (deprecated)
         # fmod (not implemented)
         "frac": {"flop_multiplier": 4}, # sub, abs, floor, sgn
-        # TODO: check below
+        # TODO: check remaining math operations below
         "lgamma": {"flop_multiplier": 3}, # ln, gamma, abs
         "log": {},
         "log10": {},
@@ -1408,7 +1432,7 @@ def _patch_tensor_methods():
     _check_operator_level_patch(torch)
     _check_operator_level_patch(torch.Tensor)
 
-# TODO: finish all reload
+# FIXME: finish reload
 def _reload_functionals():
     for name in dir(F):
         old_func = old_functions.get(name, None)
@@ -1449,9 +1473,12 @@ def _rnn_forward_hook(rnn_module, input, output):
     flops = 0
     # input is a tuple containing a sequence to process and (optionally) hidden state
     inp = input[0]
-    # FIXME: error shoot in s3prl/apc
-    batch_size = inp.shape[0]
-    seq_length = inp.shape[1]
+
+    if isinstance(inp, torch.nn.utils.rnn.PackedSequence):
+        batch_size_mul_seq_length = inp.batch_sizes.sum()
+    else:
+        batch_size = inp.shape[0]
+        seq_length = inp.shape[1]
     num_layers = rnn_module.num_layers
 
     for i in range(num_layers):
@@ -1467,8 +1494,11 @@ def _rnn_forward_hook(rnn_module, input, output):
             b_hh = rnn_module.__getattr__("bias_hh_l" + str(i))
             flops += b_ih.shape[0] + b_hh.shape[0]
 
-    flops *= batch_size
-    flops *= seq_length
+    if isinstance(inp, torch.nn.utils.rnn.PackedSequence):
+        flops *= batch_size_mul_seq_length
+    else:
+        flops *= batch_size
+        flops *= seq_length
     if rnn_module.bidirectional:
         flops *= 2
     rnn_module.__flops__ += int(flops)
