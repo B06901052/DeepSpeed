@@ -191,12 +191,14 @@ class FlopsProfiler(object):
     Args:
         object (torch.nn.Module): The PyTorch model to profile.
     """
-    def __init__(self, model, ds_engine=None, show_untracked=False):
+    def __init__(self, model, ds_engine=None, show_untracked=False, show_time=True, precision=2):
         self.model = model
         self.ds_engine = ds_engine
         self.started = False
         self.func_patched = False
         self.show_untracked = show_untracked
+        self.show_time = show_time
+        self.precision = precision
         if not self.show_untracked:
             def untracked_filter(record):
                 return record.msg.find("Untracked function") < 0
@@ -338,7 +340,7 @@ class FlopsProfiler(object):
             The number of multiply-accumulate operations of the model forward pass.
         """
         total_flops = get_module_flops(self.model)
-        return num_to_string(total_flops) if as_string else total_flops
+        return num_to_string(total_flops, precision=self.precision) if as_string else total_flops
 
     def get_total_macs(self, as_string=False):
         """Returns the total MACs of the model.
@@ -350,7 +352,7 @@ class FlopsProfiler(object):
             The number of multiply-accumulate operations of the model forward pass.
         """
         total_macs = get_module_macs(self.model)
-        return macs_to_string(total_macs) if as_string else total_macs
+        return macs_to_string(total_macs, precision=self.precision) if as_string else total_macs
 
     def get_total_duration(self, as_string=False):
         """Returns the total duration of the model forward pass.
@@ -362,7 +364,7 @@ class FlopsProfiler(object):
             The latency of the model forward pass.
         """
         total_duration = get_module_duration(self.model)
-        return duration_to_string(total_duration) if as_string else total_duration
+        return duration_to_string(total_duration, precision=self.precision) if as_string else total_duration
 
     def get_total_params(self, as_string=False):
         """Returns the total parameters of the model.
@@ -374,7 +376,7 @@ class FlopsProfiler(object):
             The number of parameters in the model.
         """
         return params_to_string(
-            self.model.__params__) if as_string else self.model.__params__
+            self.model.__params__, precision=self.precision) if as_string else self.model.__params__
 
     def print_model_profile(self,
                             profile_step=1,
@@ -436,77 +438,78 @@ class FlopsProfiler(object):
 
         print('{:<60}  {}'.format('device: ', device))
         print('{:<60}  {}'.format('input shape: ', input_shape))
-        print('{:<60}  {:<8}'.format('params per gpu: ', params_to_string(total_params)))
+        print('{:<60}  {:<8}'.format('params per gpu: ', params_to_string(total_params, precision=self.precision)))
         print('{:<60}  {:<8}'.format(
             'params of model = params per GPU * mp_size: ',
             params_to_string(total_params *
-                             (self.ds_engine.mp_world_size) if self.ds_engine else 1)))
+                             (self.ds_engine.mp_world_size) if self.ds_engine else 1, precision=self.precision)))
 
-        print('{:<60}  {:<8}'.format('fwd MACs per GPU: ', macs_to_string(total_macs)))
+        print('{:<60}  {:<8}'.format('fwd MACs per GPU: ', macs_to_string(total_macs, precision=self.precision)))
 
-        print('{:<60}  {:<8}'.format('fwd flops per GPU: ', num_to_string(total_flops)))
+        print('{:<60}  {:<8}'.format('fwd flops per GPU: ', flops_to_string(total_flops, precision=self.precision).lower()))
 
         print('{:<60}  {:<8}'.format(
             'fwd flops of model = fwd flops per GPU * mp_size: ',
             num_to_string(total_flops *
-                          (self.ds_engine.mp_world_size) if self.ds_engine else 1)))
+                          (self.ds_engine.mp_world_size) if self.ds_engine else 1, precision=self.precision)))
 
         fwd_latency = self.get_total_duration()
         if self.ds_engine and self.ds_engine.wall_clock_breakdown():
             fwd_latency = self.ds_engine.timers('forward').elapsed(False)
-        print('{:<60}  {:<8}'.format('fwd latency: ', duration_to_string(fwd_latency)))
-        print('{:<60}  {:<8}'.format(
-            'fwd FLOPS per GPU = fwd flops per GPU / fwd latency: ',
-            flops_to_string(total_flops / fwd_latency)))
+        if self.show_time:
+            print('{:<60}  {:<8}'.format('fwd latency: ', duration_to_string(fwd_latency, precision=self.precision)))
+            print('{:<60}  {:<8}'.format(
+                'fwd FLOPS per GPU = fwd flops per GPU / fwd latency: ',
+                flops_to_string(total_flops / fwd_latency, precision=self.precision)))
 
         if self.ds_engine and self.ds_engine.wall_clock_breakdown():
             bwd_latency = self.ds_engine.timers('backward').elapsed(False)
             step_latency = self.ds_engine.timers('step').elapsed(False)
-            print('{:<60}  {:<8}'.format('bwd latency: ',
-                                         duration_to_string(bwd_latency)))
-            print('{:<60}  {:<8}'.format(
-                'bwd FLOPS per GPU = 2 * fwd flops per GPU / bwd latency: ',
-                flops_to_string(2 * total_flops / bwd_latency)))
-            print('{:<60}  {:<8}'.format(
-                'fwd+bwd FLOPS per GPU = 3 * fwd flops per GPU / (fwd+bwd latency): ',
-                flops_to_string(3 * total_flops / (fwd_latency + bwd_latency))))
+            if self.show_time:
+                print('{:<60}  {:<8}'.format('bwd latency: ',
+                                             duration_to_string(bwd_latency, precision=self.precision)))
+                print('{:<60}  {:<8}'.format(
+                    'bwd FLOPS per GPU = 2 * fwd flops per GPU / bwd latency: ',
+                    flops_to_string(2 * total_flops / bwd_latency, precision=self.precision)))
+                print('{:<60}  {:<8}'.format(
+                    'fwd+bwd FLOPS per GPU = 3 * fwd flops per GPU / (fwd+bwd latency): ',
+                    flops_to_string(3 * total_flops / (fwd_latency + bwd_latency), precision=self.precision)))
 
-            print('{:<60}  {:<8}'.format('step latency: ',
-                                         duration_to_string(step_latency)))
+                print('{:<60}  {:<8}'.format('step latency: ',
+                                             duration_to_string(step_latency, precision=self.precision)))
 
-            iter_latency = fwd_latency + bwd_latency + step_latency
-            print('{:<60}  {:<8}'.format('iter latency: ',
-                                         duration_to_string(iter_latency)))
-            print('{:<60}  {:<8}'.format(
-                'FLOPS per GPU = 3 * fwd flops per GPU / iter latency: ',
-                flops_to_string(3 * total_flops / iter_latency)))
+                iter_latency = fwd_latency + bwd_latency + step_latency
+                print('{:<60}  {:<8}'.format('iter latency: ',
+                                             duration_to_string(iter_latency, precision=self.precision)))
+                print('{:<60}  {:<8}'.format(
+                    'FLOPS per GPU = 3 * fwd flops per GPU / iter latency: ',
+                    flops_to_string(3 * total_flops / iter_latency, precision=self.precision)))
 
-            samples_per_iter = self.ds_engine.train_micro_batch_size_per_gpu(
-            ) * self.ds_engine.world_size
-            print('{:<60}  {:<8.2f}'.format('samples/second: ',
-                                            samples_per_iter / iter_latency))
+                samples_per_iter = self.ds_engine.train_micro_batch_size_per_gpu(
+                ) * self.ds_engine.world_size
+                print('{:<60}  {:<8.2f}'.format('samples/second: ',
+                                                samples_per_iter / iter_latency))
 
         def flops_repr(module):
             params = module.__params__
             flops = get_module_flops(module)
             macs = get_module_macs(module)
             items = [
-                params_to_string(params),
+                params_to_string(params, precision=self.precision),
                 "{:.2%} Params".format(params / (total_params + 1e-9)),
-                macs_to_string(macs),
+                macs_to_string(macs, precision=self.precision),
                 "{:.2%} MACs".format(0.0 if total_macs == 0 else macs / (total_macs + 1e-9)),
             ]
             duration = get_module_duration(module)
 
-            # TODO: make items display can be optional
-            # TODO: make precision can be changed
-
-            items.append(duration_to_string(duration))
-            items.append(
-                "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
-                                        total_duration))
-            items.append(flops_to_string(flops).lower())
-            items.append(flops_to_string(0.0 if duration == 0 else flops / duration))
+            if self.show_time:
+                items.append(duration_to_string(duration, precision=self.precision))
+                items.append(
+                    "{:.2%} latency".format(0.0 if total_duration == 0 else duration /
+                                            total_duration))
+            items.append(flops_to_string(flops, precision=self.precision).lower())
+            if self.show_time:
+                items.append(flops_to_string(0.0 if duration == 0 else flops / duration, precision=self.precision))
             items.append(module.original_extra_repr())
             return ", ".join(items)
 
@@ -594,28 +597,28 @@ class FlopsProfiler(object):
             num_items = min(top_modules, len(info[d]))
 
             sort_macs = {
-                k: macs_to_string(v[0])
+                k: macs_to_string(v[0], precision=self.precision)
                 for k,
                 v in sorted(info[d].items(),
                             key=lambda item: item[1][0],
                             reverse=True)[:num_items]
             }
             sort_params = {
-                k: params_to_string(v[1])
+                k: params_to_string(v[1], precision=self.precision)
                 for k,
                 v in sorted(info[d].items(),
                             key=lambda item: item[1][1],
                             reverse=True)[:num_items]
             }
             sort_time = {
-                k: duration_to_string(v[2])
+                k: duration_to_string(v[2], precision=self.precision)
                 for k,
                 v in sorted(info[d].items(),
                             key=lambda item: item[1][2],
                             reverse=True)[:num_items]
             }
             sort_flops = {
-                k: flops_to_string(v[3]).lower()
+                k: flops_to_string(v[3], precision=self.precision).lower()
                 for k,
                 v in sorted(info[d].items(),
                             key=lambda item: item[1][3],
@@ -626,7 +629,8 @@ class FlopsProfiler(object):
             print(f"    params      - {sort_params}")
             print(f"    MACs        - {sort_macs}")
             print(f"    flops       - {sort_flops}")
-            print(f"    fwd latency - {sort_time}")
+            if self.show_time:
+                print(f"    fwd latency - {sort_time}")
 
 
 def _prod(dims):
@@ -1502,6 +1506,7 @@ def _rnn_forward_hook(rnn_module, input, output):
     if rnn_module.bidirectional:
         flops *= 2
     rnn_module.__flops__ += int(flops)
+    rnn_module.__macs__ += rnn_module.__flops__ // 2
 
 
 def _rnn_cell_forward_hook(rnn_cell_module, input, output):
@@ -1519,6 +1524,7 @@ def _rnn_cell_forward_hook(rnn_cell_module, input, output):
 
     flops *= batch_size
     rnn_cell_module.__flops__ += int(flops)
+    rnn_cell_module.__macs__ += int(flops) // 2
 
 
 MODULE_HOOK_MAPPING = {
@@ -1604,6 +1610,8 @@ def get_model_profile(
     output_file=None,
     ignore_modules=None,
     show_untracked=False,
+    show_time=True,
+    precision=2,
 ):
     """Returns the total floating-point operations, MACs, and parameters of a model.
 
@@ -1633,7 +1641,7 @@ def get_model_profile(
         The number of floating-point operations, multiply-accumulate operations (MACs), and parameters in the model.
     """
     assert isinstance(model, nn.Module), "model must be a PyTorch module"
-    prof = FlopsProfiler(model, show_untracked=show_untracked)
+    prof = FlopsProfiler(model, show_untracked=show_untracked, show_time=show_time, precision=precision)
     model.eval()
 
     if input_shape is not None:

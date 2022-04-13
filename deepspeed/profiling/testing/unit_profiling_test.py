@@ -24,6 +24,8 @@ def get_args():
     parser.add_argument('-t', "--test_name", default="syntax_sugar_scalerop_test")
     parser.add_argument('-l', "--list_test", help="List all defined test.", action="store_true")
     parser.add_argument('-s', "--show_untracked", help="Show all untracked functions in torch and torchaudio.", action="store_true")
+    parser.add_argument("--show_time", help="Show time related info.", action="store_true")
+    parser.add_argument("-p", "--precision", type=int, default=2)
     return parser.parse_args()
 
 """
@@ -66,4 +68,6 @@ if __name__ == "__main__":
                 output_file=os.path.join(os.path.dirname(os.path.realpath(__file__)), "log/{}.txt".format(args.test_name)),
                 ignore_modules=None,
                 show_untracked=args.show_untracked,
+                show_time=args.show_time,
+                precision=args.precision,
             )
