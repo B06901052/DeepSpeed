@@ -140,6 +140,43 @@ Different from the PyTorch profiler which calculates the flops of PyTorch operat
 The flops estimation is partly inspired by [ptflops](https://github.com/sovrasov/flops-counter.pytorch) with the major difference being that the DeepSpeed Flops Profiler not only supports flops computation directly at module level, but can also capture ```torch.nn.functional``` invoked in a module to estimate the flops.
 Thus the DeepSpeed Flops Profiler allows for customized modules in the model, e.g., ```ParallelTransformerLayerworks, ParallelSelfAttention, RowParallelLinear, etc.``` in [Megatron-LM](https://github.com/NVIDIA/Megatron-LM). This is in contrast to ptflops which requires users to write customized flops calculation functions for each customized module.
 
+### General Estimation Rule
+
+#### macs (number of multiply-accumulate operations)
+
+- $MACs=\max\{num(add)+num(sub), num(mul)+num(div)\}$
+
+#### FLOPs (number of floating-point operations)
+
+- counted flops, each count as 1
+  - arithmetic (e.g. add, sub, mul, div, pow)
+  - math (e.g. sin, cos)
+- non-counted flops
+  - assign
+  - comparison
+  - type converison
+  - hash (e.g. embedding)
+- ops not implemented yet
+  - sorting-related (e.g. max, sort, topk, medium)
+
+#### Module Not Support Yet
+
+For the modules below, it will raise a warning while your model forwards a function in them.
+
+- torch.special
+- torch.fft
+- torch.linalg
+- torchaudio
+- torchvision
+### Supplement
+
+- Exclude `torch.{batch, group, instance, layer}_norm`, the reasons are as below:
+  1. Normally we only use the ones from `torch.nn.functional`
+  2. The one from `torch.nn.functional` has chance to call the one from `torch` (C) (e.g. [here](https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#group_norm)), so we can't just compute in the one from `torch` (python) or it maybe be counted twice.
+  3. rarely directly be used
+- For `__rdiv__`, the computation is more costly than `__div__`, but we still count it just as `__div__`
+  - Actually for `__rdiv__`, it will call `reciprocal`, `__mul__`, and `__truediv__` respectively.
+
 ## Multi-GPU, Multi-node, Data Parallelism, and Model Parallelism
 
 The DeepSpeed Flops Profiler outputs the per GPU profile as well as the world size, data parallel size, and model parallel size.                                          1
