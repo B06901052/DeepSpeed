@@ -1,0 +1,5 @@
+*.txt
+*.ipynb
+* copy.*
+*warning.py
+__pycache__
