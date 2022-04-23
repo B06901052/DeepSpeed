@@ -144,7 +144,7 @@ Thus the DeepSpeed Flops Profiler allows for customized modules in the model, e.
 
 #### macs (number of multiply-accumulate operations)
 
-- $MACs=\max\{num(add)+num(sub), num(mul)+num(div)\}$
+<img src="https://render.githubusercontent.com/render/math?math=MACs=\max\{num(add)+num(sub), num(mul)+num(div)\}">
 
 #### FLOPs (number of floating-point operations)
 
