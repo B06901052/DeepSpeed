@@ -41,6 +41,7 @@ def get_profiling_args():
     parser.add_argument("--libri_root", type=str, default="/mnt/diskb/corpora/LibriSpeech/", help="The root dir of LibriSpeech")
     parser.add_argument("--log_path", type=str, help="The path for log file storing. (not include file name)", default=os.path.join(os.path.dirname(__file__), "log/"))
     parser.add_argument("--pseudo_input", action="store_true", help="use torch.randn to generate pseudo input")
+    parser.add_argument("--as_string", action="store_true", help="print result as formated string")
     return parser.parse_args()
 
 
@@ -78,7 +79,7 @@ def deepspeedProfiling(model_func, args):
             module_depth=-1,
             top_modules=3,
             warm_up=10,
-            as_string=True,
+            as_string=args.as_string,
             output_file=os.path.join(args.log_path, "{}.txt".format(args.upstream)),
             ignore_modules=None,
             show_untracked=args.show_untracked,

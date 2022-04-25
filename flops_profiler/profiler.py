@@ -273,6 +273,9 @@ class FlopsProfiler(object):
             self.func_patched = False
 
         def remove_profile_attrs(module):
+            if isinstance(module, torch.jit.ScriptModule):
+                logger.error("can't remove attr from SriptModule {}".format(module))
+                return
             if hasattr(module, "__pre_hook_handle__"):
                 module.__pre_hook_handle__.remove()
                 del module.__pre_hook_handle__
@@ -317,6 +320,9 @@ class FlopsProfiler(object):
         self.started = False
 
         def remove_profile_attrs(module):
+            if isinstance(module, torch.jit.ScriptModule):
+                logger.error("can't remove attr from SriptModule {}".format(module))
+                return
             if hasattr(module, "__flops__"):
                 del module.__flops__
             if hasattr(module, "__macs__"):
@@ -518,12 +524,16 @@ class FlopsProfiler(object):
             if module.extra_repr != flops_extra_repr:
                 module.original_extra_repr = module.extra_repr
                 module.extra_repr = flops_extra_repr
-                assert module.extra_repr != module.original_extra_repr
+                if module.extra_repr == module.original_extra_repr:
+                    logger.error("{} failed to add_extra_repr".format(str(module)))
 
         def del_extra_repr(module):
             if hasattr(module, "original_extra_repr"):
                 module.extra_repr = module.original_extra_repr
-                del module.original_extra_repr
+                try:
+                    delattr(module, "original_extra_repr")
+                except AttributeError:
+                    logger.error("{} failed to del_extra_repr".format(str(module)))
 
         self.model.apply(add_extra_repr)
 
@@ -1135,17 +1145,18 @@ def wrapFunc(func, funcFlopCompute):
         flops, macs = funcFlopCompute(*args, **kwds)
         if module_flop_count:
             module_flop_count[-1].append((name, flops))
+            flop_len = len(module_flop_count[-1])
         if module_mac_count and macs:
             module_mac_count[-1].append((name, macs))
-            
-        flop_len = len(module_flop_count[-1])
-        mac_len = len(module_mac_count[-1])
+            mac_len = len(module_mac_count[-1])
             
         result = func(*args, **kwds)
         
         # remove redundant count
-        module_flop_count[-1] = module_flop_count[-1][:flop_len]
-        module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        if module_flop_count:
+            module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        if module_mac_count and macs:
+            module_mac_count[-1] = module_mac_count[-1][:mac_len]
         
         return result
 
