@@ -790,10 +790,9 @@ def _batch_norm_flops_compute(
     has_affine = weight is not None
     if training:
         # estimation
-        return torch.numel(input) * (5 if has_affine else 4), 0
+        return torch.numel(input) * (5 if has_affine else 4), torch.numel(input) if has_affine else 0
     flops = torch.numel(input) * (2 if has_affine else 1)
-    return flops, 0
-
+    return flops, torch.numel(input) if has_affine else 0
 
 def _layer_norm_flops_compute(
     input: Tensor,
