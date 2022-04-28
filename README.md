@@ -36,6 +36,7 @@ For the modules below, it will raise a warning while your model forwards a funct
 - torch.linalg
 - torchaudio
 - torchvision
+
 ### Supplement
 
 - Exclude `torch.{batch, group, instance, layer}_norm`, the reasons are as below:
@@ -69,7 +70,7 @@ git clone -b superb-challenge --single-branch git@github.com:B06901052/DeepSpeed
 
 ```bash
 cd repo-path
-python testing/s3prl_profiling_test.py -u s3prl_upstream_name
+python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "libri_root"
 ```
 
 - The detailed result will be placed in `testing/log/{s3prl_upstream_name}.txt`
@@ -78,20 +79,20 @@ python testing/s3prl_profiling_test.py -u s3prl_upstream_name
 
 - Start from `testing/s3prl_profiling_test.py`, replace **model** by yours, add forward args and kwargs if any
 
-    ```python
-    if __name__ == "__main__":
-        args = get_profiling_args()
-        # initialize your model here
-        model = getattr(hub, args.upstream)()
-        model_args = []  # forward args
-        model_kwargs = {}# forward kwargs
-    ```
+  ```python
+  if __name__ == "__main__":
+      args = get_profiling_args()
+      # initialize your model here
+      model = getattr(hub, args.upstream)()
+      model_args = []  # forward args
+      model_kwargs = {}# forward kwargs
+  ```
 
 - Command line
 
-    ```bash
-    cd repo-path
-    python testing/s3prl_profiling_test.py -u your_model_name
-    ```
- 
+  ```bash
+  cd repo-path
+  python testing/s3prl_profiling_test.py -u "your_model_name" --libri_root "libri_root"
+  ```
+
 - The detailed result will be placed in `testing/log/{your_model_name}.txt`
