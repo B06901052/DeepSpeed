@@ -59,7 +59,7 @@ wav_paths = [
 def get_profiling_args():
     parser=argparse.ArgumentParser()
     upstreams=[attr for attr in dir(hub) if attr[0] != '_']
-    parser.add_argument('-u', '--upstream', default="hubert")
+    parser.add_argument('-u', '--upstream', default="hubert", help="This is also the filename of logfile")
     parser.add_argument('-b', '--batch_size', type=int, default=1, help="only for pseudo input")
     parser.add_argument('-l', '--seq_len', type=int, default=160000, help="only for pseudo input")
     parser.add_argument('-d', "--device", default="cuda")
@@ -165,6 +165,7 @@ def superb_profiling(model, args, wav_paths):
 
 if __name__ == "__main__":
     args = get_profiling_args()
+    # initialize your model here
     model = getattr(hub, args.upstream)()
     # profiling
     if args.pseudo_input:
