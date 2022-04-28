@@ -1,6 +1,7 @@
 import os
 import sys
 import torch
+import typing
 import logging
 import argparse
 import s3prl.hub as hub
@@ -76,7 +77,10 @@ def get_profiling_args():
 def s3prl_input_constructor(batch_size, seq_len, device, dtype):
     return [torch.randn(seq_len, dtype=dtype, device=device) for _ in range(batch_size)]
 
-def pseudo_input_profiling(model, args):
+def pseudo_input_profiling(
+    model: torch.nn.Module,
+    args: argparse.Namespace
+):
     global SAMPLE_RATE, s3prl_input_constructor
 
     with torch.no_grad():
@@ -105,7 +109,12 @@ def pseudo_input_profiling(model, args):
         return flops, macs, params
 
 
-def superb_profiling(model, args, wav_paths):
+def superb_profiling(
+    model: torch.nn.Module,
+    args: argparse.Namespace,
+    wav_paths: str,
+    ignore_modules: typing.List[torch.nn.Module]=[]
+):
     global SAMPLE_RATE, pseudo_input_profiling
     # real inputs
     def load_wav(wav_path, device, dtype):
@@ -134,7 +143,7 @@ def superb_profiling(model, args, wav_paths):
         for _ in range(10):
             _ = model(pseudo_inputs)
 
-        prof.start_profile()
+        prof.start_profile(ignore_modules)
 
         pre_macs = 0
         macs_per_seq_len = []
