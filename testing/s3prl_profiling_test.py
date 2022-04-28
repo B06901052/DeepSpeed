@@ -19,8 +19,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
-# config
-SAMPLE_RATE = 16000
+# inputs are selected from LibriSpeech test-clean split and we choice the (82*i+1)th audio for i = 0~31 (total 2620 audios)
 wav_paths = [
     "test-clean/672/122797/672-122797-0033.flac",# 20560
     "test-clean/4446/2275/4446-2275-0025.flac",# 34560
@@ -63,6 +62,7 @@ def get_profiling_args():
     parser.add_argument('-u', '--upstream', default="hubert", help="This is also the filename of logfile")
     parser.add_argument('-b', '--batch_size', type=int, default=1, help="only for pseudo input")
     parser.add_argument('-l', '--seq_len', type=int, default=160000, help="only for pseudo input")
+    parser.add_argument("--sample_rate", type=float, default=16000., help="The input sample rate")
     parser.add_argument('-d', "--device", default="cuda")
     parser.add_argument('-s', "--show_untracked", help="Show all untracked functions in torch and torchaudio.", action="store_true")
     parser.add_argument("--show_time", help="Show time related info.", action="store_true")
@@ -79,9 +79,12 @@ def s3prl_input_constructor(batch_size, seq_len, device, dtype):
 
 def pseudo_input_profiling(
     model: torch.nn.Module,
-    args: argparse.Namespace
+    args: argparse.Namespace,
+    model_args: list=[],
+    model_kwargs: dict={},
+    ignore_modules: typing.List[torch.nn.Module]=[],
 ):
-    global SAMPLE_RATE, s3prl_input_constructor
+    global s3prl_input_constructor
 
     with torch.no_grad():
         # setup model
@@ -96,17 +99,22 @@ def pseudo_input_profiling(
         # profiling
         flops, macs, params = get_model_profile(
             model=model,
-            args=[inputs],
+            args=[inputs, *model_args],
+            kwargs=model_kwargs,
             top_modules=3,
             warm_up=10,
             as_string=args.as_string,
-            output_file=os.path.join(args.log_path, "{}.txt".format(args.upstream)),
+            output_file=os.path.join(args.log_path, "{}_pseudo.txt".format(args.upstream)),
+            ignore_modules=ignore_modules,
             show_untracked=args.show_untracked,
             show_time=args.show_time,
             precision=args.precision,
         )
         del model
-        return flops, macs, params
+    
+    M = macs/args.seq_len*args.sample_rate/args.batch_size if not args.as_string else "Not support --as_string"
+    # summary
+    logger.info("summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmacs/(l/sr)/bs: {}\n".format(flops, macs, params, M))
 
 
 def superb_profiling(
@@ -115,13 +123,13 @@ def superb_profiling(
     wav_paths: str,
     model_args: list=[],
     model_kwargs: dict={},
-    ignore_modules: typing.List[torch.nn.Module]=[]
+    ignore_modules: typing.List[torch.nn.Module]=[],
 ):
-    global SAMPLE_RATE, pseudo_input_profiling
+    global pseudo_input_profiling
     # real inputs
     def load_wav(wav_path, device, dtype):
         wav, sr = torchaudio.load(os.path.join(args.libri_root, wav_path))
-        assert sr == SAMPLE_RATE, f'Sample rate mismatch: real {sr}, config {SAMPLE_RATE}'
+        assert sr == args.sample_rate, f'Sample rate mismatch: real {sr}, config {args.sample_rate}'
         wav_batch = [wav.view(-1).type(dtype).to(device)]
         return wav_batch
 
@@ -145,6 +153,49 @@ def superb_profiling(
         for _ in range(10):
             _ = model(pseudo_inputs, *model_args, **model_kwargs)
 
+        # profile seperately by bucket
+        for i, bucket in enumerate(["short", "medium", "long", "longer"]):
+            min_sec = samples[i<<3][0].shape[0] / args.sample_rate
+            max_sec = samples[(i<<3)|7][0].shape[0] / args.sample_rate
+            logger.info("bucket {}: {:.2f}~{:.2f} sec".format(bucket, min_sec, max_sec))
+            prof.start_profile(ignore_modules)
+
+            pre_macs = 0
+            macs_per_seq_len = []
+            for inputs in samples[i<<3:(i+1)<<3]:
+                _ = model(inputs, *model_args, **model_kwargs)
+                cur_macs = prof.get_total_macs()
+                macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
+                pre_macs = cur_macs
+
+            flops = prof.get_total_flops()
+            macs = prof.get_total_macs()
+            params = prof.get_total_params()
+            prof.print_model_profile(
+                profile_step=10,
+                top_modules=3,
+                output_file=os.path.join(args.log_path, "{}_{}.txt".format(args.upstream, bucket)),
+                device=args.device,
+                input_shape=[i[0].shape for i in samples]
+            )
+
+            prof.end_profile()
+            
+            M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
+            if args.as_string:
+                flops = number_to_string(flops, precision=args.precision)
+                macs = macs_to_string(macs, precision=args.precision)
+                params = params_to_string(params, precision=args.precision)
+                M = macs_to_string(M) + " / sec of an audio"
+                m = macs_to_string(m) + " / sec of an audio"
+
+            # summary
+            logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
+            
+        # profile all
+        min_sec = samples[0][0].shape[0] / args.sample_rate
+        max_sec = samples[-1][0].shape[0] / args.sample_rate
+        logger.info("bucket all: {:.2f}~{:.2f} sec".format(min_sec, max_sec))
         prof.start_profile(ignore_modules)
 
         pre_macs = 0
@@ -161,17 +212,25 @@ def superb_profiling(
         prof.print_model_profile(
             profile_step=10,
             top_modules=3,
-            output_file=os.path.join(args.log_path, "{}.txt".format(args.upstream)),
+            output_file=os.path.join(args.log_path, "{}_all.txt".format(args.upstream)),
             device=args.device,
             input_shape=[i[0].shape for i in samples]
         )
 
         prof.end_profile()
-        del model
+            
+        M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
         if args.as_string:
-            return number_to_string(flops, precision=args.precision), macs_to_string(macs, precision=args.precision), params_to_string(params, precision=args.precision), max(macs_per_seq_len), min(macs_per_seq_len)
+            flops = number_to_string(flops, precision=args.precision)
+            macs = macs_to_string(macs, precision=args.precision)
+            params = params_to_string(params, precision=args.precision)
+            M = macs_to_string(M) + " / sec of an audio"
+            m = macs_to_string(m) + " / sec of an audio"
 
-        return flops, macs, params, max(macs_per_seq_len), min(macs_per_seq_len)
+        # summary
+        logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
+            
+        
 
 
 if __name__ == "__main__":
@@ -182,13 +241,6 @@ if __name__ == "__main__":
     model_kwargs = {}# forward kwargs
     # profiling
     if args.pseudo_input:
-        flops, macs, params = pseudo_input_profiling(model, args)
-        if args.as_string:
-            M, m = None, None
-        else:
-            M = macs/args.batch_size/args.seq_len
-            m = M
+        pseudo_input_profiling(model, args, model_args, model_kwargs)
     else:
-        flops, macs, params, M, m = superb_profiling(model, args, wav_paths, model_args, model_kwargs)
-    # summary
-    logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
+        superb_profiling(model, args, wav_paths, model_args, model_kwargs)
