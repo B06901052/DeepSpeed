@@ -113,6 +113,8 @@ def superb_profiling(
     model: torch.nn.Module,
     args: argparse.Namespace,
     wav_paths: str,
+    model_args: list=[],
+    model_kwargs: dict={},
     ignore_modules: typing.List[torch.nn.Module]=[]
 ):
     global SAMPLE_RATE, pseudo_input_profiling
@@ -141,14 +143,14 @@ def superb_profiling(
         # warnup
         pseudo_inputs = s3prl_input_constructor(args.batch_size, args.seq_len, args.device, dtype)
         for _ in range(10):
-            _ = model(pseudo_inputs)
+            _ = model(pseudo_inputs, *model_args, **model_kwargs)
 
         prof.start_profile(ignore_modules)
 
         pre_macs = 0
         macs_per_seq_len = []
         for inputs in samples:
-            _ = model(inputs)
+            _ = model(inputs, *model_args, **model_kwargs)
             cur_macs = prof.get_total_macs()
             macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
             pre_macs = cur_macs
@@ -176,11 +178,13 @@ if __name__ == "__main__":
     args = get_profiling_args()
     # initialize your model here
     model = getattr(hub, args.upstream)()
+    model_args = []  # forward args
+    model_kwargs = {}# forward kwargs
     # profiling
     if args.pseudo_input:
         flops, macs, params = pseudo_input_profiling(model, args)
         M, m = None, None
     else:
-        flops, macs, params, M, m = superb_profiling(model, args, wav_paths)
+        flops, macs, params, M, m = superb_profiling(model, args, wav_paths, model_args, model_kwargs)
     # summary
     logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))

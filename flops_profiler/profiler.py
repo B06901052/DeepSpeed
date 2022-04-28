@@ -110,6 +110,7 @@ old_functions = {
     (torch.Tensor, "squeeze"): False,
     (torch.Tensor, "unsqueeze"): False,
     (torch.Tensor, "unbind"): False,
+    (torch.Tensor, "permute"): False,
     (torch.Tensor, "__len__"): False,
     (torch.Tensor, "__format__"): False,
     (torch.Tensor, "__repr__"): False,

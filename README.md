@@ -33,16 +33,18 @@ python testing/s3prl_profiling_test.py -u s3prl_upstream_name
 
 ### Profiling your model
 
-- start from `testing/s3prl_profiling_test.py`, replace **model** by yours
+- Start from `testing/s3prl_profiling_test.py`, replace **model** by yours, add forward args and kwargs if any
 
     ```python
     if __name__ == "__main__":
         args = get_profiling_args()
         # initialize your model here
         model = getattr(hub, args.upstream)()
+        model_args = []  # forward args
+        model_kwargs = {}# forward kwargs
     ```
 
-- command line
+- Command line
 
     ```bash
     cd repo-path
