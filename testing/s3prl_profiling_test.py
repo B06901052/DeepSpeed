@@ -183,7 +183,11 @@ if __name__ == "__main__":
     # profiling
     if args.pseudo_input:
         flops, macs, params = pseudo_input_profiling(model, args)
-        M, m = None, None
+        if args.as_string:
+            M, m = None, None
+        else:
+            M = macs/args.batch_size/args.seq_len
+            m = M
     else:
         flops, macs, params, M, m = superb_profiling(model, args, wav_paths, model_args, model_kwargs)
     # summary
