@@ -142,9 +142,11 @@ Thus the DeepSpeed Flops Profiler allows for customized modules in the model, e.
 
 ### General Estimation Rule
 
-#### macs (number of multiply-accumulate operations)
+The profiling tool not always follows the rules below, sometimes it just use an formula with the same order, e.g. the FLOPs of most of activation functions are estimated by `torch.numel(input)`.
 
-<img src="https://render.githubusercontent.com/render/math?math=MACs=\max\{num(add)%2bnum(sub),%20num(mul)%2bnum(div)\}">
+#### MACs (number of multiply-accumulate operations)
+
+- <img src="https://render.githubusercontent.com/render/math?math=MACs=num(a \times b %2b c)\approx FLOPs\div 2">
 
 #### FLOPs (number of floating-point operations)
 

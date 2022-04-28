@@ -13,14 +13,14 @@
   - incorrect # of ops for conv1d and conv3d
 - Add `testing/unit_profiling_test.py` for unit test of module, function, or operation
 
-## Setup
+## Usage
+
+### Setup
 
 ```bash
 # clone the branch that only contains profiling tool in our fork
 git clone -b superb-challenge --single-branch git@github.com:B06901052/DeepSpeed.git
 ```
-
-## Usage
 
 ### Profiling an upstream in s3prl
 
