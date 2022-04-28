@@ -1033,7 +1033,7 @@ def _einsum_flops_compute(equation, *operands):
     for line in optim.split("\n"):
         if "optimized flop" in line.lower():
             flop = int(float(line.split(":")[-1]))
-            return flop, 0
+            return flop, flop>>1
     raise NotImplementedError("Unsupported einsum operation.")
 
 
@@ -1522,7 +1522,7 @@ def _rnn_forward_hook(rnn_module, input, output):
     if rnn_module.bidirectional:
         flops *= 2
     rnn_module.__flops__ += int(flops)
-    rnn_module.__macs__ += rnn_module.__flops__ // 2
+    rnn_module.__macs__ += rnn_module.__flops__ >> 1
 
 
 def _rnn_cell_forward_hook(rnn_cell_module, input, output):
@@ -1540,7 +1540,7 @@ def _rnn_cell_forward_hook(rnn_cell_module, input, output):
 
     flops *= batch_size
     rnn_cell_module.__flops__ += int(flops)
-    rnn_cell_module.__macs__ += int(flops) // 2
+    rnn_cell_module.__macs__ += int(flops) >> 1
 
 
 MODULE_HOOK_MAPPING = {
