@@ -34,124 +34,130 @@ Tensor = torch.Tensor
 module_flop_count = []
 module_mac_count = []
 
-display_module_name = {
-    None: "torch",
-    torch._C._TensorBase: "torch.Tensor",
-}
-
 # Here lists the functions which have not to been counted.
 old_functions = {
-    ("torch.nn.functional", "dropout"): None,
-    ("torch.nn.functional", "dropout2d"): None,
-    ("torch.nn.functional", "dropout3d"): None,
-    ("torch.nn.functional", "split"): None,
+    (torch.nn.functional, "dropout"): False,
+    (torch.nn.functional, "dropout2d"): False,
+    (torch.nn.functional, "dropout3d"): False,
+    (torch.nn.functional, "split"): False,
     # type conversion
-    (torch._C._TensorBase, "__bool__"): None,
-    (torch._C._TensorBase, "__int__"): None,
-    (torch._C._TensorBase, "__float__"): None,
+    (torch.Tensor, "__bool__"): False,
+    (torch.Tensor, "__int__"): False,
+    (torch.Tensor, "__float__"): False,
     # bool
-    (torch._C._TensorBase, "__and__"): None,
-    (torch._C._TensorBase, "__or__"): None,
-    (torch._C._TensorBase, "__xor__"): None,
-    (torch._C._TensorBase, "__lshift__"): None,
-    (torch._C._TensorBase, "__rshift__"): None,
-    (torch._C._TensorBase, "__iand__"): None,
-    (torch._C._TensorBase, "__ior__"): None,
-    (torch._C._TensorBase, "__ixor__"): None,
-    (torch._C._TensorBase, "__ilshift__"): None,
-    (torch._C._TensorBase, "__irshift__"): None,
+    (torch.Tensor, "__and__"): False,
+    (torch.Tensor, "__or__"): False,
+    (torch.Tensor, "__xor__"): False,
+    (torch.Tensor, "__lshift__"): False,
+    (torch.Tensor, "__rshift__"): False,
+    (torch.Tensor, "__iand__"): False,
+    (torch.Tensor, "__ior__"): False,
+    (torch.Tensor, "__ixor__"): False,
+    (torch.Tensor, "__ilshift__"): False,
+    (torch.Tensor, "__irshift__"): False,
     # other
-    (torch._C._TensorBase, "__index__"): None,
-    (torch._C._TensorBase, "__getitem__"): None,
-    (torch._C._TensorBase, "__setitem__"): None,
-    (torch._C._TensorBase, "__invert__"): None,
-    (torch._C._TensorBase, "__format__"): None,
-    (torch._C._TensorBase, "__eq__"): None,
-    (torch._C._TensorBase, "__ge__"): None,
-    (torch._C._TensorBase, "__gt__"): None,
-    (torch._C._TensorBase, "__le__"): None,
-    (torch._C._TensorBase, "__lt__"): None,
-    (torch._C._TensorBase, "__ne__"): None,
-    (torch._C._TensorBase, "contiguous"): None,
+    (torch.Tensor, "__index__"): False,
+    (torch.Tensor, "__getitem__"): False,
+    (torch.Tensor, "__setitem__"): False,
+    (torch.Tensor, "__invert__"): False,
+    (torch.Tensor, "__format__"): False,
+    (torch.Tensor, "__eq__"): False,
+    (torch.Tensor, "__ge__"): False,
+    (torch.Tensor, "__gt__"): False,
+    (torch.Tensor, "__le__"): False,
+    (torch.Tensor, "__lt__"): False,
+    (torch.Tensor, "__ne__"): False,
+    (torch.Tensor, "all"): False,
+    (torch.Tensor, "any"): False,
+    (torch.Tensor, "contiguous"): False,
     # assign
-    (torch._C._TensorBase, "masked_fill"): None,
-    (torch._C._TensorBase, "masked_fill_"): None,
-    (torch._C._TensorBase, "fill"): None,
-    (torch._C._TensorBase, "fill_"): None,
+    (torch.Tensor, "masked_fill"): False,
+    (torch.Tensor, "masked_fill_"): False,
+    (torch.Tensor, "fill"): False,
+    (torch.Tensor, "fill_"): False,
     # info
-    (torch._C._TensorBase, "dim"): None,
-    (torch._C._TensorBase, "shape"): None,
-    (torch._C._TensorBase, "size"): None,
-    (torch._C._TensorBase, "has_names"): None,
-    (torch._C._TensorBase, "data_ptr"): None,
-    (torch._C._TensorBase, "get_device"): None,
+    (torch.Tensor, "dim"): False,
+    (torch.Tensor, "shape"): False,
+    (torch.Tensor, "size"): False,
+    (torch.Tensor, "has_names"): False,
+    (torch.Tensor, "data_ptr"): False,
+    (torch.Tensor, "get_device"): False,
+    (torch.Tensor, "numel"): False,
     # device
-    (torch._C._TensorBase, "to"): None,
-    (torch._C._TensorBase, "cpu"): None,
-    (torch._C._TensorBase, "cuda"): None,
+    (torch.Tensor, "to"): False,
+    (torch.Tensor, "cpu"): False,
+    (torch.Tensor, "cuda"): False,
     # type conversion
-    (torch._C._TensorBase, "type_as"): None,
-    (torch._C._TensorBase, "float"): None,
-    (torch._C._TensorBase, "double"): None,
-    (torch._C._TensorBase, "long"): None,
-    (torch._C._TensorBase, "bool"): None,
-    (torch._C._TensorBase, "tolist"): None,
-    (torch._C._TensorBase, "numpy"): None,
-    (torch._C._TensorBase, "item"): None,
+    (torch.Tensor, "type_as"): False,
+    (torch.Tensor, "float"): False,
+    (torch.Tensor, "double"): False,
+    (torch.Tensor, "long"): False,
+    (torch.Tensor, "bool"): False,
+    (torch.Tensor, "tolist"): False,
+    (torch.Tensor, "numpy"): False,
+    (torch.Tensor, "item"): False,
+    (torch.Tensor, "clone"): False,
     # view or reshape
-    (torch._C._TensorBase, "view"): None,
-    (torch._C._TensorBase, "expand"): None,
-    (torch._C._TensorBase, "repeat"): None,
-    (torch._C._TensorBase, "as_strided"): None,
-    (torch._C._TensorBase, "scatter"): None,
-    (torch._C._TensorBase, "scatter_"): None,
-    ("torch._tensor", "__len__"): None,
-    ("torch._tensor", "__format__"): None,
-    ("torch._tensor", "__repr__"): None,
-    ("torch._tensor", "split"): None,
+    (torch.Tensor, "view"): False,
+    (torch.Tensor, "expand"): False,
+    (torch.Tensor, "repeat"): False,
+    (torch.Tensor, "reshape"): False,
+    (torch.Tensor, "transpose"): False,
+    (torch.Tensor, "as_strided"): False,
+    (torch.Tensor, "scatter"): False,
+    (torch.Tensor, "scatter_"): False,
+    (torch.Tensor, "chunk"): False,
+    (torch.Tensor, "squeeze"): False,
+    (torch.Tensor, "unsqueeze"): False,
+    (torch.Tensor, "unbind"): False,
+    (torch.Tensor, "__len__"): False,
+    (torch.Tensor, "__format__"): False,
+    (torch.Tensor, "__repr__"): False,
+    (torch.Tensor, "split"): False,
     # comparison
-    (None, "eq"): None,
-    (None, "ge"): None,
-    (None, "gt"): None,
-    (None, "le"): None,
-    (None, "lt"): None,
-    (None, "ne"): None,
-    (None, "where"): None,
-    (None, "isfinite"): None,
+    (torch, "eq"): False,
+    (torch, "ge"): False,
+    (torch, "gt"): False,
+    (torch, "le"): False,
+    (torch, "lt"): False,
+    (torch, "ne"): False,
+    (torch, "all"): False,
+    (torch, "any"): False,
+    (torch, "where"): False,
+    (torch, "isfinite"): False,
     # comparison alias
-    (None, "greater_equal"): None,
-    (None, "greater"): None,
-    (None, "less_equal"): None,
-    (None, "less"): None,
-    (None, "not_equal"): None,
+    (torch, "greater_equal"): False,
+    (torch, "greater"): False,
+    (torch, "less_equal"): False,
+    (torch, "less"): False,
+    (torch, "not_equal"): False,
     # normalization, see QA.md for more detail
-    (None, "batch_norm"): None,
-    (None, "group_norm"): None,
-    (None, "instance_norm"): None,
-    (None, "layer_norm"): None,
+    (torch, "batch_norm"): False,
+    (torch, "group_norm"): False,
+    (torch, "instance_norm"): False,
+    (torch, "layer_norm"): False,
     # shape-related
-    (None, "cat"): None,
-    (None, "stack"): None,
-    (None, "vstack"): None,
-    (None, "hstack"): None,
-    (None, "sstack"): None,
-    (None, "row_stack"): None,
-    (None, "column_stack"): None,
-    (None, "slice"): None,
-    (None, "chunk"): None,
+    (torch, "cat"): False,
+    (torch, "stack"): False,
+    (torch, "vstack"): False,
+    (torch, "hstack"): False,
+    (torch, "sstack"): False,
+    (torch, "row_stack"): False,
+    (torch, "column_stack"): False,
+    (torch, "slice"): False,
+    (torch, "chunk"): False,
     # creation
-    (None, "empty_like"): None,
-    (None, "full_like"): None,
-    (None, "ones_like"): None,
-    (None, "randn_like"): None,
-    (None, "zeros_like"): None,
+    (torch, "empty_like"): False,
+    (torch, "full_like"): False,
+    (torch, "ones_like"): False,
+    (torch, "randn_like"): False,
+    (torch, "zeros_like"): False,
     # info
-    (None, "numel"): None,
+    (torch, "numel"): False,
     # other
-    (None, "embedding"): None,
+    (torch, "embedding"): False,
     # already been counted somewhere (unless you directly call it)
-    (None, "relu"): None,
-    (None, "softmax"): None,
+    (torch, "relu"): False,
 }
 
 
@@ -268,11 +274,13 @@ class FlopsProfiler(object):
         All torch.nn.functionals are restored to their originals.
         """
         if self.started and self.func_patched:
-            _reload_functionals()
-            _reload_tensor_methods()
+            _reload_functions()
             self.func_patched = False
 
         def remove_profile_attrs(module):
+            if isinstance(module, torch.jit.ScriptModule):
+                logger.error("can't remove attr from SriptModule {}".format(module))
+                return
             if hasattr(module, "__pre_hook_handle__"):
                 module.__pre_hook_handle__.remove()
                 del module.__pre_hook_handle__
@@ -317,6 +325,9 @@ class FlopsProfiler(object):
         self.started = False
 
         def remove_profile_attrs(module):
+            if isinstance(module, torch.jit.ScriptModule):
+                logger.error("can't remove attr from SriptModule {}".format(module))
+                return
             if hasattr(module, "__flops__"):
                 del module.__flops__
             if hasattr(module, "__macs__"):
@@ -518,12 +529,16 @@ class FlopsProfiler(object):
             if module.extra_repr != flops_extra_repr:
                 module.original_extra_repr = module.extra_repr
                 module.extra_repr = flops_extra_repr
-                assert module.extra_repr != module.original_extra_repr
+                if module.extra_repr == module.original_extra_repr:
+                    logger.error("{} failed to add_extra_repr".format(str(module)))
 
         def del_extra_repr(module):
             if hasattr(module, "original_extra_repr"):
                 module.extra_repr = module.original_extra_repr
-                del module.original_extra_repr
+                try:
+                    delattr(module, "original_extra_repr")
+                except AttributeError:
+                    logger.error("{} failed to del_extra_repr".format(str(module)))
 
         self.model.apply(add_extra_repr)
 
@@ -850,7 +865,7 @@ def _upsample_flops_compute(input,
     return flops, 0
 
 
-def _softmax_flops_compute(input, dim=None, _stacklevel=3, dtype=None):
+def _softmax_flops_compute(input, dim=None, **kwargs):
     return torch.numel(input), 0
 
 
@@ -1090,22 +1105,21 @@ def _unary_flops_compute_generator(flop_multiplier=1, flop_bias=0, macs_multipli
     return _unary_flops_compute
 
 
-def wrapFunc(func, funcFlopCompute):
-    module = getattr(func, "__module__", None)
-    module = getattr(func, "__objclass__", None) if module is None else module
-    name = func.__name__
-    if (module, name) in old_functions:
-        if func != old_functions[(module, name)]:
-            raise RuntimeError("keys are conflict in old_functions at {}.{}\nold func: {}\ncurrent func: {}".format(display_module_name.get(module, module), name, func, old_functions[(module, name)]))
+def wrapFunc(module, func, name, funcFlopCompute):
+    if old_functions.get((module, name), None) is False:
+        return func
+    
+    elif old_functions.get((module, name), None) is not None:
+        if func == old_functions[(module, name)]:
+            return getattr(module, name)
+        else:
+            raise RuntimeError("keys are conflict in old_functions at {}.{}\nold func: {}\ncurrent func: {}".format(module, name, func, old_functions[(module, name)]))
     
     old_functions[(module, name)] = func
 
     @functools.wraps(func)
     def newFuncLogging(*args, **kwds):
-        try:
-            logger.log(logging.SHOWFUNC, func.__objclass__)
-        except:
-            logger.log(logging.SHOWFUNC, func.__module__)
+        logger.log(logging.SHOWFUNC, module)
         logger.log(logging.SHOWFUNC, name + " is called !!!!")
         if isinstance(args[0], (torch.Tensor, int, float)):
             print("input:\n", args[0].detach().numpy())
@@ -1134,37 +1148,38 @@ def wrapFunc(func, funcFlopCompute):
         flops, macs = funcFlopCompute(*args, **kwds)
         if module_flop_count:
             module_flop_count[-1].append((name, flops))
+            flop_len = len(module_flop_count[-1])
         if module_mac_count and macs:
             module_mac_count[-1].append((name, macs))
-            
-        flop_len = len(module_flop_count[-1])
-        mac_len = len(module_mac_count[-1])
+            mac_len = len(module_mac_count[-1])
             
         result = func(*args, **kwds)
         
         # remove redundant count
-        module_flop_count[-1] = module_flop_count[-1][:flop_len]
-        module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        if module_flop_count:
+            module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        if module_mac_count and macs:
+            module_mac_count[-1] = module_mac_count[-1][:mac_len]
         
         return result
 
     return newFuncLogging if logger.level == logging.SHOWFUNC else newFunc
 
-def wrapWarning(func):
-    module = getattr(func, "__module__", None)
-    module = getattr(func, "__objclass__", None) if module is None else module
-    name = func.__name__
-    if (module, name) in old_functions:
+def wrapWarning(module, func, name):
+    if old_functions.get((module, name), None) is False:
+        return func
+    
+    elif old_functions.get((module, name), None) is not None:
         if func == old_functions[(module, name)]:
-            return old_functions[(module, name)]
+            return getattr(module, name)
         else:
-            raise RuntimeError("duplicate wrapWarning at {}.{}\nold func: {}\ncurrent func: {}".format(display_module_name.get(module, module), name, func, old_functions[(module, name)]))
+            raise RuntimeError("keys are conflict in old_functions at {}.{}\nold func: {}\ncurrent func: {}".format(module, name, func, old_functions[(module, name)]))
     old_functions[(module, name)] = func
 
 
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        logger.warning("forward an unimplemented(may be fully/partial/non counted) function: {}.{}".format(display_module_name.get(module, module), name))
+        logger.warning("forward an unimplemented(may be fully/partial/non counted) function: {}.{}".format(module, name))
         return func(*args, **kwds)
 
     return newFunc
@@ -1181,11 +1196,11 @@ def _check_function_level_patch(pytorch_module):
                 not pytorch_module.__name__.startswith("torch.")
             ) and 
             hasattr(func, "__call__") and
-            not (func.__module__, name) in old_functions
+            not (pytorch_module, name) in old_functions
         ):
             count += 1
             logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
-            setattr(pytorch_module, name, wrapWarning(func))
+            setattr(pytorch_module, name, wrapWarning(pytorch_module, func, name))
     
     logger.info("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
     
@@ -1195,12 +1210,11 @@ def _check_operator_level_patch(pytorch_module):
     for func, name in map(lambda x: (x, x.__name__), overridable_functions):
         if (
             hasattr(func, "__call__") and
-            not (getattr(func, "__module__", None), name) in old_functions and
-            not (getattr(func, "__objclass__", None), name) in old_functions
+            not (pytorch_module, name) in old_functions
         ):
             count += 1
             logger.info("[{}] Untracked function: {}".format(pytorch_module.__name__, name))
-            setattr(pytorch_module, name, wrapWarning(func))
+            setattr(pytorch_module, name, wrapWarning(pytorch_module, func, name))
     
     logger.info("[{}] Untracked function count: {}".format(pytorch_module.__name__, count))
  
@@ -1231,61 +1245,63 @@ def _patch_fft():
 
 def _patch_nn_functionals():
     # FC
-    F.linear = wrapFunc(F.linear, _linear_flops_compute)
+    F.linear = wrapFunc(F, F.linear, "linear", _linear_flops_compute)
 
     # convolutions
-    F.conv1d = wrapFunc(F.conv1d, _conv_flops_compute)
-    F.conv2d = wrapFunc(F.conv2d, _conv_flops_compute)
-    F.conv3d = wrapFunc(F.conv3d, _conv_flops_compute)
+    F.conv1d = wrapFunc(F, F.conv1d, "conv1d", _conv_flops_compute)
+    F.conv2d = wrapFunc(F, F.conv2d, "conv2d", _conv_flops_compute)
+    F.conv3d = wrapFunc(F, F.conv3d, "conv3d", _conv_flops_compute)
 
     # conv transposed
-    F.conv_transpose1d = wrapFunc(F.conv_transpose1d, _conv_trans_flops_compute)
-    F.conv_transpose2d = wrapFunc(F.conv_transpose2d, _conv_trans_flops_compute)
-    F.conv_transpose3d = wrapFunc(F.conv_transpose3d, _conv_trans_flops_compute)
+    F.conv_transpose1d = wrapFunc(F, F.conv_transpose1d, "conv_transpose1d", _conv_trans_flops_compute)
+    F.conv_transpose2d = wrapFunc(F, F.conv_transpose2d, "conv_transpose2d", _conv_trans_flops_compute)
+    F.conv_transpose3d = wrapFunc(F, F.conv_transpose3d, "conv_transpose3d", _conv_trans_flops_compute)
 
     # activations
-    F.relu = wrapFunc(F.relu, _relu_flops_compute)
-    F.prelu = wrapFunc(F.prelu, _prelu_flops_compute)
-    F.elu = wrapFunc(F.elu, _elu_flops_compute)
-    F.leaky_relu = wrapFunc(F.leaky_relu, _leaky_relu_flops_compute)
-    F.relu6 = wrapFunc(F.relu6, _relu6_flops_compute)
+    F.relu = wrapFunc(F, F.relu, "relu", _relu_flops_compute)
+    F.prelu = wrapFunc(F, F.prelu, "prelu", _prelu_flops_compute)
+    F.elu = wrapFunc(F, F.elu, "elu", _elu_flops_compute)
+    F.leaky_relu = wrapFunc(F, F.leaky_relu, "leaky_relu", _leaky_relu_flops_compute)
+    F.relu6 = wrapFunc(F, F.relu6, "relu6", _relu6_flops_compute)
     if hasattr(F, "silu"):
-        F.silu = wrapFunc(F.silu, _silu_flops_compute)
-    F.gelu = wrapFunc(F.gelu, _gelu_flops_compute)
+        F.silu = wrapFunc(F, F.silu, "silu", _silu_flops_compute)
+    F.gelu = wrapFunc(F, F.gelu, "gelu", _gelu_flops_compute)
 
     # Normalizations
-    F.batch_norm = wrapFunc(F.batch_norm, _batch_norm_flops_compute)
-    F.layer_norm = wrapFunc(F.layer_norm, _layer_norm_flops_compute)    
-    F.instance_norm = wrapFunc(F.instance_norm, _instance_norm_flops_compute)
-    F.group_norm = wrapFunc(F.group_norm, _group_norm_flops_compute)
+    F.batch_norm = wrapFunc(F, F.batch_norm, "batch_norm", _batch_norm_flops_compute)
+    F.layer_norm = wrapFunc(F, F.layer_norm, "layer_norm", _layer_norm_flops_compute)    
+    F.instance_norm = wrapFunc(F, F.instance_norm, "instance_norm", _instance_norm_flops_compute)
+    F.group_norm = wrapFunc(F, F.group_norm, "group_norm", _group_norm_flops_compute)
 
     # poolings
-    F.avg_pool1d = wrapFunc(F.avg_pool1d, _pool_flops_compute)
-    F.avg_pool2d = wrapFunc(F.avg_pool2d, _pool_flops_compute)
-    F.avg_pool3d = wrapFunc(F.avg_pool3d, _pool_flops_compute)
-    F.max_pool1d = wrapFunc(F.max_pool1d, _pool_flops_compute)
-    F.max_pool2d = wrapFunc(F.max_pool2d, _pool_flops_compute)
-    F.max_pool3d = wrapFunc(F.max_pool3d, _pool_flops_compute)
-    F.adaptive_avg_pool1d = wrapFunc(F.adaptive_avg_pool1d, _pool_flops_compute)
-    F.adaptive_avg_pool2d = wrapFunc(F.adaptive_avg_pool2d, _pool_flops_compute)
-    F.adaptive_avg_pool3d = wrapFunc(F.adaptive_avg_pool3d, _pool_flops_compute)
-    F.adaptive_max_pool1d = wrapFunc(F.adaptive_max_pool1d, _pool_flops_compute)
-    F.adaptive_max_pool2d = wrapFunc(F.adaptive_max_pool2d, _pool_flops_compute)
-    F.adaptive_max_pool3d = wrapFunc(F.adaptive_max_pool3d, _pool_flops_compute)
+    F.avg_pool1d = wrapFunc(F, F.avg_pool1d, "avg_pool1d", _pool_flops_compute)
+    F.avg_pool2d = wrapFunc(F, F.avg_pool2d, "avg_pool2d", _pool_flops_compute)
+    F.avg_pool3d = wrapFunc(F, F.avg_pool3d, "avg_pool3d", _pool_flops_compute)
+    F.max_pool1d = wrapFunc(F, F.max_pool1d, "max_pool1d", _pool_flops_compute)
+    F.max_pool2d = wrapFunc(F, F.max_pool2d, "max_pool2d", _pool_flops_compute)
+    F.max_pool3d = wrapFunc(F, F.max_pool3d, "max_pool3d", _pool_flops_compute)
+    F.adaptive_avg_pool1d = wrapFunc(F, F.adaptive_avg_pool1d, "adaptive_avg_pool1d", _pool_flops_compute)
+    F.adaptive_avg_pool2d = wrapFunc(F, F.adaptive_avg_pool2d, "adaptive_avg_pool2d", _pool_flops_compute)
+    F.adaptive_avg_pool3d = wrapFunc(F, F.adaptive_avg_pool3d, "adaptive_avg_pool3d", _pool_flops_compute)
+    F.adaptive_max_pool1d = wrapFunc(F, F.adaptive_max_pool1d, "adaptive_max_pool1d", _pool_flops_compute)
+    F.adaptive_max_pool2d = wrapFunc(F, F.adaptive_max_pool2d, "adaptive_max_pool2d", _pool_flops_compute)
+    F.adaptive_max_pool3d = wrapFunc(F, F.adaptive_max_pool3d, "adaptive_max_pool3d", _pool_flops_compute)
 
     # upsample
-    F.upsample = wrapFunc(F.upsample, _upsample_flops_compute)
-    F.interpolate = wrapFunc(F.interpolate, _upsample_flops_compute)
+    F.upsample = wrapFunc(F, F.upsample, "upsample", _upsample_flops_compute)
+    F.interpolate = wrapFunc(F, F.interpolate, "interpolate", _upsample_flops_compute)
 
     # softmax
-    F.softmax = wrapFunc(F.softmax, _softmax_flops_compute)
+    F.softmax = wrapFunc(F, F.softmax, "softmax", _softmax_flops_compute)
 
     # embedding
-    F.embedding = wrapFunc(F.embedding, _embedding_flops_compute)
+    F.embedding = wrapFunc(F, F.embedding, "embedding", _embedding_flops_compute)
 
     # multi_head_attention_forward
     F.multi_head_attention_forward = wrapFunc(
+        F,
         F.multi_head_attention_forward,
+        "multi_head_attention_forward",
         _multi_head_attention_forward_flops_compute,
     )
     
@@ -1301,42 +1317,45 @@ def _patch_special():
     _check_function_level_patch(torch.special)
 
 def _patch_tensor_methods():
-    torch.matmul = wrapFunc(torch.matmul, _matmul_flops_compute)
-    torch.Tensor.matmul = wrapFunc(torch.Tensor.matmul, _matmul_flops_compute)
-    torch.Tensor.__matmul__ = wrapFunc(torch.Tensor.__matmul__, _matmul_flops_compute)
+    torch.matmul = wrapFunc(torch, torch.matmul, "matmul", _matmul_flops_compute)
+    torch.Tensor.matmul = wrapFunc(torch.Tensor, torch.Tensor.matmul, "matmul", _matmul_flops_compute)
+    torch.Tensor.__matmul__ = wrapFunc(torch.Tensor, torch.Tensor.__matmul__, "__matmul__", _matmul_flops_compute)
     
-    torch.mm = wrapFunc(torch.mm, _matmul_flops_compute)
-    torch.Tensor.mm = wrapFunc(torch.Tensor.mm, _matmul_flops_compute)
-    torch.bmm = wrapFunc(torch.bmm, _matmul_flops_compute)
-    torch.Tensor.bmm = wrapFunc(torch.Tensor.bmm, _matmul_flops_compute)
+    torch.mm = wrapFunc(torch, torch.mm, "mm", _matmul_flops_compute)
+    torch.Tensor.mm = wrapFunc(torch.Tensor, torch.Tensor.mm, "mm", _matmul_flops_compute)
+    torch.bmm = wrapFunc(torch, torch.bmm, "bmm", _matmul_flops_compute)
+    torch.Tensor.bmm = wrapFunc(torch.Tensor, torch.Tensor.bmm, "bmm", _matmul_flops_compute)
 
-    torch.addmm = wrapFunc(torch.addmm, _addmm_flops_compute)
-    torch.Tensor.addmm = wrapFunc(torch.Tensor.addmm, _tensor_addmm_flops_compute)
+    torch.addmm = wrapFunc(torch, torch.addmm, "addmm", _addmm_flops_compute)
+    torch.Tensor.addmm = wrapFunc(torch.Tensor, torch.Tensor.addmm, "addmm", _tensor_addmm_flops_compute)
     
-    ops = ["add", "sub", "mul", "div", "truediv", "pow", "floordiv"]
+    torch.softmax = wrapFunc(torch, torch.softmax, "softmax", _softmax_flops_compute)
+    torch.Tensor.softmax = wrapFunc(torch.Tensor, torch.Tensor.softmax, "softmax", _softmax_flops_compute)
+    
+    ops = ["add", "sub", "mul", "truediv", "floordiv", "div", "pow"]
     for op in ops:
         # syntax sugar
         sugar_op = "__{}__".format(op)
-        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+        setattr(torch.Tensor, sugar_op, wrapFunc(torch.Tensor, getattr(torch.Tensor, sugar_op), sugar_op, _elementwise_flops_compute))
         
         # inplace syntax sugar
         sugar_op = "__i{}__".format(op)
-        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+        setattr(torch.Tensor, sugar_op, wrapFunc(torch.Tensor, getattr(torch.Tensor, sugar_op), sugar_op, _elementwise_flops_compute))
         # raw syntax sugar
         sugar_op = "__r{}__".format(op)
-        setattr(torch.Tensor, sugar_op, wrapFunc(getattr(torch.Tensor, sugar_op), _elementwise_flops_compute))
+        setattr(torch.Tensor, sugar_op, wrapFunc(torch.Tensor, getattr(torch.Tensor, sugar_op), sugar_op, _elementwise_flops_compute))
 
         # torch.op and torch.Tensor.op     
         op = "true_divide" if op == "truediv" else op
         op = "floor_divide" if op == "floordiv" else op
-        setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
-        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
+        setattr(torch, op, wrapFunc(torch, getattr(torch, op), op, _elementwise_flops_compute))
+        setattr(torch.Tensor, op, wrapFunc(torch.Tensor, getattr(torch.Tensor, op), op, _elementwise_flops_compute))
 
     # alias
     ops = ["subtract", "multiply", "divide"]
     for op in ops:
-        setattr(torch, op, wrapFunc(getattr(torch, op), _elementwise_flops_compute))
-        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), _elementwise_flops_compute))
+        setattr(torch, op, wrapFunc(torch, getattr(torch, op), op, _elementwise_flops_compute))
+        setattr(torch.Tensor, op, wrapFunc(torch.Tensor, getattr(torch.Tensor, op), op, _elementwise_flops_compute))
         
     # https://pytorch.org/docs/stable/torch.html#math-operations
     math_ops = {
@@ -1423,29 +1442,25 @@ def _patch_tensor_methods():
             has_correction=math_ops[op].get("has_correction", False)
         )
         # torch.op
-        setattr(torch, op, wrapFunc(getattr(torch, op), funcFlopCompute))
+        setattr(torch, op, wrapFunc(torch, getattr(torch, op), op, funcFlopCompute))
         # torch.Tensor.op
         if op in not_in_tensor:
             continue
-        setattr(torch.Tensor, op, wrapFunc(getattr(torch.Tensor, op), funcFlopCompute))
+        setattr(torch.Tensor, op, wrapFunc(torch.Tensor, getattr(torch.Tensor, op), op, funcFlopCompute))
         
     
-    torch.einsum = wrapFunc(torch.einsum, _einsum_flops_compute)
+    torch.einsum = wrapFunc(torch, torch.einsum, "einsum", _einsum_flops_compute)
     
     _check_operator_level_patch(torch)
     _check_operator_level_patch(torch.Tensor)
 
-# FIXME: finish reload
-def _reload_functionals():
-    for name in dir(F):
-        old_func = old_functions.get(name, None)
-        if old_func is not None:
-            setattr(F, name, old_func)
-
-
-def _reload_tensor_methods():
-    torch.matmul = old_functions[(None, torch.matmul.__name__)]
-
+def _reload_functions():
+    for (module, name) in old_functions:
+        old_func = old_functions[(module, name)]
+        if old_func is not None and not isinstance(old_func, bool):
+            setattr(module, name, old_func)
+            old_functions[(module, name)] = None
+            
 
 def _rnn_flops(flops, rnn_module, w_ih, w_hh, input_size):
     # matrix matrix mult ih state and internal state
