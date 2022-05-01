@@ -40,6 +40,7 @@ old_functions = {
     (torch.nn.functional, "dropout2d"): False,
     (torch.nn.functional, "dropout3d"): False,
     (torch.nn.functional, "split"): False,
+    (torch.nn.functional, "pad"): False,
     # type conversion
     (torch.Tensor, "__bool__"): False,
     (torch.Tensor, "__int__"): False,
@@ -75,6 +76,7 @@ old_functions = {
     (torch.Tensor, "masked_fill_"): False,
     (torch.Tensor, "fill"): False,
     (torch.Tensor, "fill_"): False,
+    (torch.Tensor, "zero_"): False,
     # info
     (torch.Tensor, "dim"): False,
     (torch.Tensor, "shape"): False,
@@ -83,10 +85,15 @@ old_functions = {
     (torch.Tensor, "data_ptr"): False,
     (torch.Tensor, "get_device"): False,
     (torch.Tensor, "numel"): False,
+    (torch.Tensor, "__len__"): False,
+    (torch.Tensor, "__format__"): False,
+    (torch.Tensor, "__repr__"): False,
+    (torch.Tensor, "is_floating_point"): False,
     # device
     (torch.Tensor, "to"): False,
     (torch.Tensor, "cpu"): False,
     (torch.Tensor, "cuda"): False,
+    (torch.Tensor, "detach"): False,
     # type conversion
     (torch.Tensor, "type_as"): False,
     (torch.Tensor, "float"): False,
@@ -111,10 +118,9 @@ old_functions = {
     (torch.Tensor, "unsqueeze"): False,
     (torch.Tensor, "unbind"): False,
     (torch.Tensor, "permute"): False,
-    (torch.Tensor, "__len__"): False,
-    (torch.Tensor, "__format__"): False,
-    (torch.Tensor, "__repr__"): False,
     (torch.Tensor, "split"): False,
+    (torch.Tensor, "flip"): False,
+    (torch.Tensor, "index_select"): False,
     # comparison
     (torch, "eq"): False,
     (torch, "ge"): False,
@@ -147,6 +153,7 @@ old_functions = {
     (torch, "column_stack"): False,
     (torch, "slice"): False,
     (torch, "chunk"): False,
+    (torch, "flip"): False,
     # creation
     (torch, "empty_like"): False,
     (torch, "full_like"): False,
@@ -157,8 +164,6 @@ old_functions = {
     (torch, "numel"): False,
     # other
     (torch, "embedding"): False,
-    # already been counted somewhere (unless you directly call it)
-    (torch, "relu"): False,
 }
 
 
@@ -1181,7 +1186,7 @@ def wrapWarning(module, func, name):
 
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        logger.warning("forward an unimplemented(may be fully/partial/non counted) function: {}.{}".format(module, name))
+        logger.warning("forward an unimplemented(may be fully/partial/non counted) function: {}.{}".format(getattr(module, "__name__", module), name))
         return func(*args, **kwds)
 
     return newFunc
@@ -1333,6 +1338,10 @@ def _patch_tensor_methods():
     
     torch.softmax = wrapFunc(torch, torch.softmax, "softmax", _softmax_flops_compute)
     torch.Tensor.softmax = wrapFunc(torch.Tensor, torch.Tensor.softmax, "softmax", _softmax_flops_compute)
+    
+    # activations
+    torch.relu = wrapFunc(torch, torch.relu, "relu", _relu_flops_compute)
+    torch.prelu = wrapFunc(torch, torch.prelu, "prelu", _prelu_flops_compute)
     
     ops = ["add", "sub", "mul", "truediv", "floordiv", "div", "pow"]
     for op in ops:

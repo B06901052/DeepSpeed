@@ -19,7 +19,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
-# inputs are selected from LibriSpeech test-clean split and we choice the (82*i+1)th audio for i = 0~31 (total 2620 audios)
+# inputs are selected from LibriSpeech test-clean split and we choice the (82*i+1)th audio for i = 0~31 (total 2620 audios), the script used to select is "in utils/get_libri_sample.sh"
 wav_paths = [
     "test-clean/672/122797/672-122797-0033.flac",# 20560
     "test-clean/4446/2275/4446-2275-0025.flac",# 34560
@@ -71,6 +71,7 @@ def get_profiling_args():
     parser.add_argument("--log_path", type=str, help="The path for log file storing. (not include file name)", default=os.path.join(os.path.dirname(__file__), "log/"))
     parser.add_argument("--pseudo_input", action="store_true", help="use torch.randn to generate pseudo input")
     parser.add_argument("--as_string", action="store_true", help="print result as formated string")
+    parser.add_argument("--with_bucket", action="store_true", help="divide inputs into four buckets by sequence length and report the result seperately")
     return parser.parse_args()
 
 
@@ -154,44 +155,45 @@ def superb_profiling(
             _ = model(pseudo_inputs, *model_args, **model_kwargs)
 
         # profile seperately by bucket
-        for i, bucket in enumerate(["short", "medium", "long", "longer"]):
-            min_sec = samples[i<<3][0].shape[0] / args.sample_rate
-            max_sec = samples[(i<<3)|7][0].shape[0] / args.sample_rate
-            logger.info("bucket {}: {:.2f}~{:.2f} sec".format(bucket, min_sec, max_sec))
-            prof.start_profile(ignore_modules)
+        if args.with_bucket:
+            for i, bucket in enumerate(["short", "medium", "long", "longer"]):
+                min_sec = samples[i<<3][0].shape[0] / args.sample_rate
+                max_sec = samples[(i<<3)|7][0].shape[0] / args.sample_rate
+                logger.info("bucket {}: {:.2f}~{:.2f} sec".format(bucket, min_sec, max_sec))
+                prof.start_profile(ignore_modules)
 
-            pre_macs = 0
-            macs_per_seq_len = []
-            for inputs in samples[i<<3:(i+1)<<3]:
-                _ = model(inputs, *model_args, **model_kwargs)
-                cur_macs = prof.get_total_macs()
-                macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
-                pre_macs = cur_macs
+                pre_macs = 0
+                macs_per_seq_len = []
+                for inputs in samples[i<<3:(i+1)<<3]:
+                    _ = model(inputs, *model_args, **model_kwargs)
+                    cur_macs = prof.get_total_macs()
+                    macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
+                    pre_macs = cur_macs
 
-            flops = prof.get_total_flops()
-            macs = prof.get_total_macs()
-            params = prof.get_total_params()
-            prof.print_model_profile(
-                profile_step=10,
-                top_modules=3,
-                output_file=os.path.join(args.log_path, "{}_{}.txt".format(args.upstream, bucket)),
-                device=args.device,
-                input_shape=[i[0].shape for i in samples]
-            )
+                flops = prof.get_total_flops()
+                macs = prof.get_total_macs()
+                params = prof.get_total_params()
+                prof.print_model_profile(
+                    profile_step=10,
+                    top_modules=3,
+                    output_file=os.path.join(args.log_path, "{}_{}.txt".format(args.upstream, bucket)),
+                    device=args.device,
+                    input_shape=[i[0].shape for i in samples]
+                )
 
-            prof.end_profile()
-            
-            M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
-            if args.as_string:
-                flops = number_to_string(flops, precision=args.precision)
-                macs = macs_to_string(macs, precision=args.precision)
-                params = params_to_string(params, precision=args.precision)
-                M = macs_to_string(M) + " / sec of an audio"
-                m = macs_to_string(m) + " / sec of an audio"
+                prof.end_profile()
+                
+                M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
+                if args.as_string:
+                    flops = number_to_string(flops, precision=args.precision)
+                    macs = macs_to_string(macs, precision=args.precision)
+                    params = params_to_string(params, precision=args.precision)
+                    M = macs_to_string(M) + " / sec of an audio"
+                    m = macs_to_string(m) + " / sec of an audio"
 
-            # summary
-            logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
-            
+                # summary
+                logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
+                
         # profile all
         min_sec = samples[0][0].shape[0] / args.sample_rate
         max_sec = samples[-1][0].shape[0] / args.sample_rate
