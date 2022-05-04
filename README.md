@@ -1,6 +1,6 @@
 # Profiling Tool for SLT2022 SUPERB Challenge
 
-[This profiling tool](https://github.com/B06901052/DeepSpeed/tree/superb-challenge/flops_profiler) we used are mainly based on [DeepSpeed](https://github.com/microsoft/DeepSpeed/tree/master/deepspeed/profiling/flops_profiler) developed by **Microsoft**. And for our demands, we fork it and add some additional features.
+[This profiling tool](https://github.com/B06901052/DeepSpeed/tree/superb-challenge/flops_profiler) we used are mainly based on [DeepSpeed](https://github.com/microsoft/DeepSpeed/tree/master/deepspeed/profiling/flops_profiler) developed by **Microsoft**. To meet our demands, we fork it and add some additional features. For more about the profiling tool, see the original README in `flops_profilier`.
 
 ## Overview
 
@@ -92,7 +92,30 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
 
   ```bash
   cd repo-path
+  # add "--as_string" for making the result more readable
   python testing/s3prl_profiling_test.py -u "your_model_name" --libri_root "libri_root"
   ```
 
-- The detailed result will be placed in `testing/log/{your_model_name}.txt`
+- Report the **params** and **sum of macs** to superb challenge, like the result of hubert_base as below:
+
+  ```bash
+  [s3prl_profiling_test] INFO - bucket all: 1.28~20.38 sec
+  [s3prl_profiling_test] INFO - summary, l = sequence length, bs = batch size
+  sum of flops: 3339820715216
+  sum of macs: 1669156022848
+  params: 94697600
+  macs/sec of an audio = macs/l/bs*sr
+  maximum of macs/sec of an audio: 7922013353.619633
+  minimum of macs/sec of an audio: 7002466614.785993
+  ```
+
+  - Note: This profiling tool will count all params in your model, even if some params not have not been used in forwarding. You can manually exclude those params by temporarily replace those modules with `nn.Identity()` if you want.
+
+- Additionally: The detailed result will be placed in `testing/log/{your_model_name}_{data_bucket}.txt`
+  - We sort the 32 samples by sequence length and equally divide them to 4 buckets, the names of buckets are as below:
+    - short,
+    - medium,
+    - long,
+    - longer,
+    - and all for original result
+  - add `--with_bucket` to get the the 4 buckets result

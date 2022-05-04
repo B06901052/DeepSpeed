@@ -192,7 +192,7 @@ def superb_profiling(
                     m = macs_to_string(m) + " / sec of an audio"
 
                 # summary
-                logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
+                logger.info("summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {}\nminimum of macs/sec of an audio: {}\n\n".format(flops, macs, params, M, m))
                 
         # profile all
         min_sec = samples[0][0].shape[0] / args.sample_rate
@@ -230,7 +230,7 @@ def superb_profiling(
             m = macs_to_string(m) + " / sec of an audio"
 
         # summary
-        logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmaximum of macs/l/bs: {}\nminimum of macs/l/bs: {}\n\n".format(flops, macs, params, M, m))
+        logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {}\nminimum of macs/sec of an audio: {}\n\n".format(flops, macs, params, M, m))
             
         
 
