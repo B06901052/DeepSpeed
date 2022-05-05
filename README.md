@@ -19,6 +19,7 @@ The profiling tool not always follows the rules below, sometimes it just use an 
 - counted flops, each count as 1
   - arithmetic (e.g. add, sub, mul, div, pow)
   - math (e.g. sin, cos)
+  - activation function (e.g. gelu, relu, lrelu)
 - non-counted flops
   - assign
   - comparison
@@ -99,23 +100,61 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
 - Report the **params** and **sum of macs** to superb challenge, like the result of hubert_base as below:
 
   ```bash
+  [s3prl_profiling_test] INFO - bucket short: 1.28~3.44 sec
+  [s3prl_profiling_test] INFO - summary, l = sequence length, bs = batch size, sr = sample rate
+  sum of flops: 298.81 G
+  sum of macs: 149.26 GMACs
+  params: 94.7 M
+  macs/sec of an audio = macs/l/bs*sr
+  maximum of macs/sec of an audio: 7.12 GMACs / sec of an audio
+  minimum of macs/sec of an audio: 7.0 GMACs / sec of an audio
+
+
+  [s3prl_profiling_test] INFO - bucket medium: 3.69~5.47 sec
+  [s3prl_profiling_test] INFO - summary, l = sequence length, bs = batch size, sr = sample rate
+  sum of flops: 523.02 G
+  sum of macs: 261.28 GMACs
+  params: 94.7 M
+  macs/sec of an audio = macs/l/bs*sr
+  maximum of macs/sec of an audio: 7.21 GMACs / sec of an audio
+  minimum of macs/sec of an audio: 7.11 GMACs / sec of an audio
+
+
+  [s3prl_profiling_test] INFO - bucket long: 5.79~8.91 sec
+  [s3prl_profiling_test] INFO - summary, l = sequence length, bs = batch size, sr = sample rate
+  sum of flops: 845.28 G
+  sum of macs: 422.37 GMACs
+  params: 94.7 M
+  macs/sec of an audio = macs/l/bs*sr
+  maximum of macs/sec of an audio: 7.37 GMACs / sec of an audio
+  minimum of macs/sec of an audio: 7.22 GMACs / sec of an audio
+
+
+  [s3prl_profiling_test] INFO - bucket longer: 9.62~20.38 sec
+  [s3prl_profiling_test] INFO - summary, l = sequence length, bs = batch size, sr = sample rate
+  sum of flops: 1.67 T
+  sum of macs: 836.25 GMACs
+  params: 94.7 M
+  macs/sec of an audio = macs/l/bs*sr
+  maximum of macs/sec of an audio: 7.92 GMACs / sec of an audio
+  minimum of macs/sec of an audio: 7.41 GMACs / sec of an audio
+
+
   [s3prl_profiling_test] INFO - bucket all: 1.28~20.38 sec
   [s3prl_profiling_test] INFO - summary, l = sequence length, bs = batch size
-  sum of flops: 3339820715216
-  sum of macs: 1669156022848
-  params: 94697600
+  sum of flops: 3.34 T
+  sum of macs: 1.67 TMACs
+  params: 94.7 M
   macs/sec of an audio = macs/l/bs*sr
-  maximum of macs/sec of an audio: 7922013353.619633
-  minimum of macs/sec of an audio: 7002466614.785993
+  maximum of macs/sec of an audio: 7.92 GMACs / sec of an audio
+  minimum of macs/sec of an audio: 7.0 GMACs / sec of an audio
   ```
 
   - Note: This profiling tool will count all params in your model, even if some params not have not been used in forwarding. You can manually exclude those params by temporarily replace those modules with `nn.Identity()` if you want.
-
-- Additionally: The detailed result will be placed in `testing/log/{your_model_name}_{data_bucket}.txt`
-  - We sort the 32 samples by sequence length and equally divide them to 4 buckets, the names of buckets are as below:
-    - short,
-    - medium,
-    - long,
-    - longer,
-    - and all for original result
-  - add `--with_bucket` to get the the 4 buckets result
+  - The detailed result will be placed in `testing/log/{your_model_name}_{data_bucket}.txt`
+    - We sort the 32 samples by sequence length and equally divide them to 4 buckets, the names of buckets are as below:
+      - short,
+      - medium,
+      - long,
+      - longer,
+      - and all for original result

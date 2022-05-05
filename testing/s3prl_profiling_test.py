@@ -71,7 +71,7 @@ def get_profiling_args():
     parser.add_argument("--log_path", type=str, help="The path for log file storing. (not include file name)", default=os.path.join(os.path.dirname(__file__), "log/"))
     parser.add_argument("--pseudo_input", action="store_true", help="use torch.randn to generate pseudo input")
     parser.add_argument("--as_string", action="store_true", help="print result as formated string")
-    parser.add_argument("--with_bucket", action="store_true", help="divide inputs into four buckets by sequence length and report the result seperately")
+    parser.add_argument("--without_bucket", action="store_true", help="not divide inputs into four buckets by sequence length and report the result seperately")
     return parser.parse_args()
 
 
@@ -155,7 +155,7 @@ def superb_profiling(
             _ = model(pseudo_inputs, *model_args, **model_kwargs)
 
         # profile seperately by bucket
-        if args.with_bucket:
+        if not args.without_bucket:
             for i, bucket in enumerate(["short", "medium", "long", "longer"]):
                 min_sec = samples[i<<3][0].shape[0] / args.sample_rate
                 max_sec = samples[(i<<3)|7][0].shape[0] / args.sample_rate
