@@ -105,6 +105,7 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
   sum of flops: 298.81 G
   sum of macs: 149.26 GMACs
   params: 94.7 M
+  rough time: 0.161sec
   macs/sec of an audio = macs/l/bs*sr
   maximum of macs/sec of an audio: 7.12 GMACs / sec of an audio
   minimum of macs/sec of an audio: 7.0 GMACs / sec of an audio
@@ -115,6 +116,7 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
   sum of flops: 523.02 G
   sum of macs: 261.28 GMACs
   params: 94.7 M
+  rough time: 0.256sec
   macs/sec of an audio = macs/l/bs*sr
   maximum of macs/sec of an audio: 7.21 GMACs / sec of an audio
   minimum of macs/sec of an audio: 7.11 GMACs / sec of an audio
@@ -125,6 +127,7 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
   sum of flops: 845.28 G
   sum of macs: 422.37 GMACs
   params: 94.7 M
+  rough time: 0.341sec
   macs/sec of an audio = macs/l/bs*sr
   maximum of macs/sec of an audio: 7.37 GMACs / sec of an audio
   minimum of macs/sec of an audio: 7.22 GMACs / sec of an audio
@@ -135,6 +138,7 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
   sum of flops: 1.67 T
   sum of macs: 836.25 GMACs
   params: 94.7 M
+  rough time: 0.547sec
   macs/sec of an audio = macs/l/bs*sr
   maximum of macs/sec of an audio: 7.92 GMACs / sec of an audio
   minimum of macs/sec of an audio: 7.41 GMACs / sec of an audio
@@ -145,6 +149,7 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
   sum of flops: 3.34 T
   sum of macs: 1.67 TMACs
   params: 94.7 M
+  rough time: 1.353sec
   macs/sec of an audio = macs/l/bs*sr
   maximum of macs/sec of an audio: 7.92 GMACs / sec of an audio
   minimum of macs/sec of an audio: 7.0 GMACs / sec of an audio

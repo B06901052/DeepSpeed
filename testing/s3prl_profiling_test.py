@@ -6,6 +6,7 @@ import logging
 import argparse
 import s3prl.hub as hub
 import torchaudio
+from time import time
 
 sys.path.append(os.path.realpath(os.path.join(__file__, "../../")))
 
@@ -161,7 +162,8 @@ def superb_profiling(
                 max_sec = samples[(i<<3)|7][0].shape[0] / args.sample_rate
                 logger.info("bucket {}: {:.2f}~{:.2f} sec".format(bucket, min_sec, max_sec))
                 prof.start_profile(ignore_modules)
-
+                
+                t = time()
                 pre_macs = 0
                 macs_per_seq_len = []
                 for inputs in samples[i<<3:(i+1)<<3]:
@@ -178,8 +180,9 @@ def superb_profiling(
                     top_modules=3,
                     output_file=os.path.join(args.log_path, "{}_{}.txt".format(args.upstream, bucket)),
                     device=args.device,
-                    input_shape=[i[0].shape for i in samples]
+                    input_shape=[i[0].shape for i in samples[i<<3:(i+1)<<3]]
                 )
+                t = time() - t
 
                 prof.end_profile()
                 
@@ -192,7 +195,7 @@ def superb_profiling(
                     m = macs_to_string(m) + " / sec of an audio"
 
                 # summary
-                logger.info("summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {}\nminimum of macs/sec of an audio: {}\n\n".format(flops, macs, params, M, m))
+                logger.info(f"summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
                 
         # profile all
         min_sec = samples[0][0].shape[0] / args.sample_rate
@@ -200,6 +203,7 @@ def superb_profiling(
         logger.info("bucket all: {:.2f}~{:.2f} sec".format(min_sec, max_sec))
         prof.start_profile(ignore_modules)
 
+        t = time()
         pre_macs = 0
         macs_per_seq_len = []
         for inputs in samples:
@@ -218,6 +222,7 @@ def superb_profiling(
             device=args.device,
             input_shape=[i[0].shape for i in samples]
         )
+        t = time() - t
 
         prof.end_profile()
             
@@ -230,7 +235,7 @@ def superb_profiling(
             m = macs_to_string(m) + " / sec of an audio"
 
         # summary
-        logger.info("summary, l = sequence length, bs = batch size\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {}\nminimum of macs/sec of an audio: {}\n\n".format(flops, macs, params, M, m))
+        logger.info(f"summary, l = sequence length, bs = batch size\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
             
         
 
