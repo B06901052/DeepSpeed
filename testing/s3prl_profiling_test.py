@@ -163,6 +163,7 @@ def superb_profiling(
                 logger.info("bucket {}: {:.2f}~{:.2f} sec".format(bucket, min_sec, max_sec))
                 prof.start_profile(ignore_modules)
                 
+                torch.cuda.synchronize()
                 t = time()
                 pre_macs = 0
                 macs_per_seq_len = []
@@ -182,6 +183,8 @@ def superb_profiling(
                     device=args.device,
                     input_shape=[i[0].shape for i in samples[i<<3:(i+1)<<3]]
                 )
+                
+                torch.cuda.synchronize()
                 t = time() - t
 
                 prof.end_profile()
