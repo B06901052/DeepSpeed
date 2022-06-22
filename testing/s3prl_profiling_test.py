@@ -4,6 +4,7 @@ import torch
 import typing
 import logging
 import argparse
+import importlib
 import s3prl.hub as hub
 import torchaudio
 from time import time
@@ -61,6 +62,7 @@ def get_profiling_args():
     parser=argparse.ArgumentParser()
     upstreams=[attr for attr in dir(hub) if attr[0] != '_']
     parser.add_argument('-u', '--upstream', default="hubert", help="This is also the filename of logfile")
+    parser.add_argument('--upstream_ckpt', default="", help="The ckpt path for upstream")
     parser.add_argument('-b', '--batch_size', type=int, default=1, help="only for pseudo input")
     parser.add_argument('-l', '--seq_len', type=int, default=160000, help="only for pseudo input")
     parser.add_argument("--sample_rate", type=float, default=16000., help="The input sample rate")
@@ -246,7 +248,19 @@ def superb_profiling(
 if __name__ == "__main__":
     args = get_profiling_args()
     # initialize your model here
-    model = getattr(hub, args.upstream)()
+    try:
+        Upstream = getattr(hub, args.upstream)
+    except AttributeError:
+        print("[UpstreamExpert] - Try to import upstream locally")
+        module_path = f's3prl.upstream.{args.upstream}.expert'
+        Upstream = getattr(importlib.import_module(module_path), 'UpstreamExpert')
+    
+    if args.upstream_ckpt:
+        # if initialization need ckpt
+        model = Upstream(args.upstream_ckpt)
+    else:
+        model = Upstream()
+    
     model_args = []  # forward args
     model_kwargs = {}# forward kwargs
     # profiling
