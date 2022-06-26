@@ -3,19 +3,25 @@ import typing
 import logging
 import inspect
 import functools
+import numpy as np
+from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+old_functions = {}
 try:
     import torchaudio
-except:
+    old_functions.update({
+        (torchaudio.compliance.kaldi, "Tensor"): False,
+        (torchaudio.compliance.kaldi, "Tuple"): False,
+    })
+except ModuleNotFoundError:
     pass
 try:
     import torchvision
-except:
+except ModuleNotFoundError:
     pass
-from collections import OrderedDict
-import numpy as np
 
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
@@ -35,7 +41,7 @@ module_flop_count = []
 module_mac_count = []
 
 # Here lists the functions which have not to been counted.
-old_functions = {
+old_functions.update({
     (torch.nn.functional, "dropout"): False,
     (torch.nn.functional, "dropout2d"): False,
     (torch.nn.functional, "dropout3d"): False,
@@ -164,7 +170,7 @@ old_functions = {
     (torch, "numel"): False,
     # other
     (torch, "embedding"): False,
-}
+})
 
 
 class FlopsProfiler(object):
@@ -226,10 +232,16 @@ class FlopsProfiler(object):
         """
         self.reset_profile()
         _patch_torch()
-        if "torchaudio" in dir():
+        try:
+            import torchaudio
             _patch_torchaudio()
-        if "torchvision" in dir():
+        except ModuleNotFoundError:
+            pass
+        try:
+            import torchvision
             _patch_torchvision()
+        except ModuleNotFoundError:
+            pass
 
         def register_module_hooks(module, ignore_list):
             if ignore_list and type(module) in ignore_list:
@@ -1245,6 +1257,7 @@ def _patch_torchvision():
 def _patch_torchaudio():# 42
     # TODO: finish torchaudio.functional, make it optional
     _check_function_level_patch(torchaudio.functional)
+    _check_function_level_patch(torchaudio.compliance.kaldi)
     pass
     
 def _patch_fft():
