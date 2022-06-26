@@ -4,7 +4,7 @@
 
 ## Overview
 
-This profiling tool profiles model by wrapping each torch function / operator with repective estimation formula, and while calling the wrapped function / oerator, the MACs and FLOPs will be accumulated (and for the case that a wrapped function in another wrapped function, drop the redundant counts). We also wrap an warning message with untracked function /operator in [here](#module-not-support-yet).
+This profiling tool profiles model by wrapping each torch function / operator with repective estimation formula, and while calling the wrapped function / oerator, the MACs and FLOPs will be accumulated (and for the case that a wrapped function in another wrapped function, drop the redundant counts). We also wrap an warning message with untracked function / operator in [here](#module-not-support-yet).
 
 ### General Estimation Rule
 
@@ -30,7 +30,7 @@ The profiling tool not always follows the rules below, sometimes it just use an 
 
 #### Module Not Support Yet
 
-For the modules below, it will raise a warning while your model forwards a function in them.
+For the modules below, they will raise a warning while your model forwards a function in them. And will not count any operation in the function. For example, `torchaudio.compliance.kaldi.fbank` is an untracked function and there is a `torch.mm` operation, which is tracked, in it. Then the `torch.mm` will not be taken into account even though  it is tracked.
 
 - torch.special
 - torch.fft

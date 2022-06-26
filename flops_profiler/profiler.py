@@ -1199,8 +1199,22 @@ def wrapWarning(module, func, name):
 
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        logger.warning("forward an unimplemented(may be fully/partial/non counted) function: {}.{}".format(getattr(module, "__name__", module), name))
-        return func(*args, **kwds)
+        logger.warning("forward an unimplemented function: {}.{}".format(getattr(module, "__name__", module), name))
+
+        if module_flop_count:
+            flop_len = len(module_flop_count[-1])
+        if module_mac_count:
+            mac_len = len(module_mac_count[-1])
+            
+        result = func(*args, **kwds)
+        
+        # remove redundant count
+        if module_flop_count:
+            module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        if module_mac_count:
+            module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        return result
+    
 
     return newFunc
 
