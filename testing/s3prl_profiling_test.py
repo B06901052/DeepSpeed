@@ -8,6 +8,7 @@ import importlib
 import s3prl.hub as hub
 import torchaudio
 from time import time
+from pathlib import Path
 
 sys.path.append(os.path.realpath(os.path.join(__file__, "../../")))
 
@@ -63,6 +64,11 @@ def get_profiling_args():
     upstreams=[attr for attr in dir(hub) if attr[0] != '_']
     parser.add_argument('-u', '--upstream', default="hubert", help="This is also the filename of logfile")
     parser.add_argument('--upstream_ckpt', default="", help="The ckpt path for upstream")
+    # huggingface
+    parser.add_argument('--from_hf_hub', action="store_true")
+    parser.add_argument('--hf_org_name', type=str)
+    parser.add_argument('--hf_repo_name', type=str)
+    parser.add_argument('--hf_revision', type=str)
     parser.add_argument('-b', '--batch_size', type=int, default=1, help="only for pseudo input")
     parser.add_argument('-l', '--seq_len', type=int, default=160000, help="only for pseudo input")
     parser.add_argument("--sample_rate", type=float, default=16000., help="The input sample rate")
@@ -248,12 +254,34 @@ def superb_profiling(
 if __name__ == "__main__":
     args = get_profiling_args()
     # initialize your model here
-    try:
-        Upstream = getattr(hub, args.upstream)
-    except AttributeError:
-        print("[UpstreamExpert] - Try to import upstream locally")
-        module_path = f's3prl.upstream.{args.upstream}.expert'
-        Upstream = getattr(importlib.import_module(module_path), 'UpstreamExpert')
+    if args.from_hf_hub == True:
+        from huggingface_hub import snapshot_download
+
+        print(f'[Runner] - Downloading upstream model {args.upstream} from the Hugging Face Hub')
+        filepath = snapshot_download(
+            repo_id = f"{args.hf_org_name}/{args.hf_repo_name}",
+            revision = args.hf_revision,
+            use_auth_token = True
+        )
+        sys.path.append(filepath)
+
+        dependencies = (Path(filepath) / 'requirements.txt').resolve()
+        print("[Dependency] - The downloaded upstream model requires the following dependencies. Please make sure they are installed:")
+        for idx, line in enumerate((Path(filepath) / "requirements.txt").open().readlines()):
+            print(f"{idx}. {line.strip()}")
+        print(f"You can install them by:\n")
+        print(f"pip install -r {dependencies}\n")
+
+        from expert import UpstreamExpert
+        Upstream = UpstreamExpert
+        args.upstream_ckpt = os.path.join(filepath, "model.pt")
+    else:
+        try:
+            Upstream = getattr(hub, args.upstream)
+        except AttributeError:
+            print("[UpstreamExpert] - Try to import upstream locally")
+            module_path = f's3prl.upstream.{args.upstream}.expert'
+            Upstream = getattr(importlib.import_module(module_path), 'UpstreamExpert')
     
     if args.upstream_ckpt:
         # if initialization need ckpt
