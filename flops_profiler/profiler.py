@@ -326,8 +326,7 @@ class FlopsProfiler(object):
         def add_or_reset_attrs(module):
             module.__flops__ = 0
             module.__macs__ = 0
-            module.__params__ = sum(p.numel() for p in module.parameters()
-                                    if p.requires_grad)
+            module.__params__ = sum(p.numel() for p in module.parameters())
             module.__start_time__ = 0
             module.__duration__ = 0
 
