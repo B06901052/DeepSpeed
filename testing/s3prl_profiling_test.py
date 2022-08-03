@@ -21,6 +21,7 @@ formatter: logging.Formatter = logging.Formatter('[%(module)s] %(levelname)s - %
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
+logger.propagate = False
 
 # inputs are selected from LibriSpeech test-clean split and we choice the (82*i+1)th audio for i = 0~31 (total 2620 audios), the script used to select is "in utils/get_libri_sample.sh"
 wav_paths = [

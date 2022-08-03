@@ -39,6 +39,7 @@ Tensor = torch.Tensor
 
 module_flop_count = []
 module_mac_count = []
+warning_msg = set()
 
 # Here lists the functions which have not to been counted.
 old_functions.update({
@@ -47,6 +48,13 @@ old_functions.update({
     (torch.nn.functional, "dropout3d"): False,
     (torch.nn.functional, "split"): False,
     (torch.nn.functional, "pad"): False,
+    (torch._C._nn, "pad_sequence"): False,
+    (torch._C._nn, "reflection_pad1d"): False,
+    (torch._C._nn, "reflection_pad2d"): False,
+    (torch._C._nn, "reflection_pad3d"): False,
+    (torch._C._nn, "replication_pad1d"): False,
+    (torch._C._nn, "replication_pad2d"): False,
+    (torch._C._nn, "replication_pad3d"): False,
     # type conversion
     (torch.Tensor, "__bool__"): False,
     (torch.Tensor, "__int__"): False,
@@ -74,6 +82,7 @@ old_functions.update({
     (torch.Tensor, "__le__"): False,
     (torch.Tensor, "__lt__"): False,
     (torch.Tensor, "__ne__"): False,
+    (torch.Tensor, "__hash__"): False,
     (torch.Tensor, "all"): False,
     (torch.Tensor, "any"): False,
     (torch.Tensor, "contiguous"): False,
@@ -339,6 +348,8 @@ class FlopsProfiler(object):
         """
         if not self.started:
             return
+        for msg in sorted(warning_msg):
+            logging.warning(msg)
         self.stop_profile()
         self.started = False
 
@@ -1144,6 +1155,8 @@ def wrapFunc(module, func, name, funcFlopCompute):
             print("input:\n", args[0].detach().numpy())
 
         flops, macs = funcFlopCompute(*args, **kwds)
+        logger.log(logging.SHOWFUNC, f"MACs: {macs}")
+        
         if module_flop_count:
             module_flop_count[-1].append((name, flops))
         if module_mac_count and macs:
@@ -1198,7 +1211,7 @@ def wrapWarning(module, func, name):
 
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        logger.warning("forward an unimplemented function: {}.{}".format(getattr(module, "__name__", module), name))
+        warning_msg.add("forward an unimplemented function: {}.{}".format(getattr(module, "__name__", module), name))
 
         if module_flop_count:
             flop_len = len(module_flop_count[-1])
@@ -1226,7 +1239,8 @@ def _check_function_level_patch(pytorch_module):
         if (
             (
                 func in overridable_functions or # exclude func from typing
-                not pytorch_module.__name__.startswith("torch.")
+                not pytorch_module.__name__.startswith("torch.") or
+                pytorch_module.__name__.startswith("torch._")
             ) and 
             hasattr(func, "__call__") and
             not (pytorch_module, name) in old_functions
@@ -1280,6 +1294,7 @@ def _patch_fft():
 def _patch_nn_functionals():
     # FC
     F.linear = wrapFunc(F, F.linear, "linear", _linear_flops_compute)
+    torch._C._nn.linear = wrapFunc(torch._C._nn, torch._C._nn.linear, "linear", _linear_flops_compute)
 
     # convolutions
     F.conv1d = wrapFunc(F, F.conv1d, "conv1d", _conv_flops_compute)
@@ -1341,6 +1356,7 @@ def _patch_nn_functionals():
     
     # not implemented
     _check_function_level_patch(F)
+    _check_function_level_patch(torch._C._nn)
 
 def _patch_linalg():
     # TODO: finish linalg
