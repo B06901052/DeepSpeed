@@ -1,7 +1,6 @@
 import time
 import typing
 import logging
-import inspect
 import functools
 import numpy as np
 from collections import OrderedDict
@@ -1014,21 +1013,21 @@ def wrapFunc(module, func, name, funcFlopCompute):
     
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        flops, macs = funcFlopCompute(*args, **kwds)
         if module_flop_count:
-            module_flop_count[-1].append((name, flops))
             flop_len = len(module_flop_count[-1])
-        if module_mac_count and macs:
-            module_mac_count[-1].append((name, macs))
+        if module_mac_count:
             mac_len = len(module_mac_count[-1])
-            
+        
         result = func(*args, **kwds)
+        flops, macs = funcFlopCompute(*args, **kwds)
         
         # remove redundant count
         if module_flop_count:
             module_flop_count[-1] = module_flop_count[-1][:flop_len]
-        if module_mac_count and macs:
+            module_flop_count[-1].append((name, flops))
+        if module_mac_count:
             module_mac_count[-1] = module_mac_count[-1][:mac_len]
+            module_mac_count[-1].append((name, macs))
         
         return result
 
