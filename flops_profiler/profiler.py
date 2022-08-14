@@ -42,143 +42,59 @@ module_mac_count = []
 warning_msg = set()
 
 # Here lists the functions which have not to been counted.
+# torch.nn.functional
 old_functions.update({
-    (torch.nn.functional, "dropout"): False,
-    (torch.nn.functional, "dropout2d"): False,
-    (torch.nn.functional, "dropout3d"): False,
-    (torch.nn.functional, "split"): False,
-    (torch.nn.functional, "pad"): False,
-    (torch._C._nn, "pad_sequence"): False,
-    (torch._C._nn, "reflection_pad1d"): False,
-    (torch._C._nn, "reflection_pad2d"): False,
-    (torch._C._nn, "reflection_pad3d"): False,
-    (torch._C._nn, "replication_pad1d"): False,
-    (torch._C._nn, "replication_pad2d"): False,
-    (torch._C._nn, "replication_pad3d"): False,
-    # type conversion
-    (torch.Tensor, "__bool__"): False,
-    (torch.Tensor, "__int__"): False,
-    (torch.Tensor, "__float__"): False,
+    (F, func): False for func in ["dropout", "dropout2d", "dropout3d", "split", "pad", "embedding"]
+})
+# torch._C._nn
+old_functions.update({
+    (torch._C._nn, func): False for func in [
+        "pad_sequence",
+        "reflection_pad1d", "reflection_pad2d", "reflection_pad3d",
+        "replication_pad1d", "replication_pad2d", "replication_pad3d"
+    ]
+})
+# torch.Tensor
+old_functions.update({
+    (torch.Tensor, func): False for func in [
     # bool
-    (torch.Tensor, "__and__"): False,
-    (torch.Tensor, "__or__"): False,
-    (torch.Tensor, "__xor__"): False,
-    (torch.Tensor, "__lshift__"): False,
-    (torch.Tensor, "__rshift__"): False,
-    (torch.Tensor, "__iand__"): False,
-    (torch.Tensor, "__ior__"): False,
-    (torch.Tensor, "__ixor__"): False,
-    (torch.Tensor, "__ilshift__"): False,
-    (torch.Tensor, "__irshift__"): False,
+    "__and__", "__or__", "__xor__", "__lshift__", "__rshift__", "__iand__", "__ior__", "__ixor__", "__ilshift__", "__irshift__",
     # other
-    (torch.Tensor, "__index__"): False,
-    (torch.Tensor, "__getitem__"): False,
-    (torch.Tensor, "__setitem__"): False,
-    (torch.Tensor, "__invert__"): False,
-    (torch.Tensor, "__format__"): False,
-    (torch.Tensor, "__eq__"): False,
-    (torch.Tensor, "__ge__"): False,
-    (torch.Tensor, "__gt__"): False,
-    (torch.Tensor, "__le__"): False,
-    (torch.Tensor, "__lt__"): False,
-    (torch.Tensor, "__ne__"): False,
-    (torch.Tensor, "__hash__"): False,
-    (torch.Tensor, "all"): False,
-    (torch.Tensor, "any"): False,
-    (torch.Tensor, "contiguous"): False,
-    # assign
-    (torch.Tensor, "masked_fill"): False,
-    (torch.Tensor, "masked_fill_"): False,
-    (torch.Tensor, "fill"): False,
-    (torch.Tensor, "fill_"): False,
-    (torch.Tensor, "zero_"): False,
-    # info
-    (torch.Tensor, "dim"): False,
-    (torch.Tensor, "shape"): False,
-    (torch.Tensor, "size"): False,
-    (torch.Tensor, "has_names"): False,
-    (torch.Tensor, "data_ptr"): False,
-    (torch.Tensor, "get_device"): False,
-    (torch.Tensor, "numel"): False,
-    (torch.Tensor, "__len__"): False,
-    (torch.Tensor, "__format__"): False,
-    (torch.Tensor, "__repr__"): False,
-    (torch.Tensor, "is_floating_point"): False,
-    # device
-    (torch.Tensor, "to"): False,
-    (torch.Tensor, "cpu"): False,
-    (torch.Tensor, "cuda"): False,
-    (torch.Tensor, "detach"): False,
-    # type conversion
-    (torch.Tensor, "type_as"): False,
-    (torch.Tensor, "float"): False,
-    (torch.Tensor, "double"): False,
-    (torch.Tensor, "long"): False,
-    (torch.Tensor, "bool"): False,
-    (torch.Tensor, "tolist"): False,
-    (torch.Tensor, "numpy"): False,
-    (torch.Tensor, "item"): False,
-    (torch.Tensor, "clone"): False,
-    # view or reshape
-    (torch.Tensor, "view"): False,
-    (torch.Tensor, "expand"): False,
-    (torch.Tensor, "repeat"): False,
-    (torch.Tensor, "reshape"): False,
-    (torch.Tensor, "transpose"): False,
-    (torch.Tensor, "as_strided"): False,
-    (torch.Tensor, "scatter"): False,
-    (torch.Tensor, "scatter_"): False,
-    (torch.Tensor, "chunk"): False,
-    (torch.Tensor, "squeeze"): False,
-    (torch.Tensor, "unsqueeze"): False,
-    (torch.Tensor, "unbind"): False,
-    (torch.Tensor, "permute"): False,
-    (torch.Tensor, "split"): False,
-    (torch.Tensor, "flip"): False,
-    (torch.Tensor, "index_select"): False,
+    "__index__", "__getitem__", "__setitem__", "__invert__", "__format__", "__hash__", "contiguous",
     # comparison
-    (torch, "eq"): False,
-    (torch, "ge"): False,
-    (torch, "gt"): False,
-    (torch, "le"): False,
-    (torch, "lt"): False,
-    (torch, "ne"): False,
-    (torch, "all"): False,
-    (torch, "any"): False,
-    (torch, "where"): False,
-    (torch, "isfinite"): False,
-    # comparison alias
-    (torch, "greater_equal"): False,
-    (torch, "greater"): False,
-    (torch, "less_equal"): False,
-    (torch, "less"): False,
-    (torch, "not_equal"): False,
-    # normalization, see QA.md for more detail
-    (torch, "batch_norm"): False,
-    (torch, "group_norm"): False,
-    (torch, "instance_norm"): False,
-    (torch, "layer_norm"): False,
-    # shape-related
-    (torch, "cat"): False,
-    (torch, "stack"): False,
-    (torch, "vstack"): False,
-    (torch, "hstack"): False,
-    (torch, "sstack"): False,
-    (torch, "row_stack"): False,
-    (torch, "column_stack"): False,
-    (torch, "slice"): False,
-    (torch, "chunk"): False,
-    (torch, "flip"): False,
-    # creation
-    (torch, "empty_like"): False,
-    (torch, "full_like"): False,
-    (torch, "ones_like"): False,
-    (torch, "randn_like"): False,
-    (torch, "zeros_like"): False,
+    "__eq__", "__ge__", "__gt__", "__le__", "__lt__", "__ne__",
+    "eq", "ge", "gt", "le", "lt", "ne", "all", "any", "min", "max",
+    # assign
+    "masked_fill", "masked_fill_", "fill", "fill_", "zero_",
     # info
-    (torch, "numel"): False,
-    # other
-    (torch, "embedding"): False,
+    "__len__", "__format__", "__repr__",
+    "dim", "shape", "size", "has_names", "data_ptr", "get_device", "numel", "is_floating_point",
+    # device
+    "to", "cpu", "cuda", "detach",
+    # type conversion
+    "__bool__", "__int__", "__float__",
+    "type_as", "float", "double", "long", "bool", "tolist", "numpy", "item", "clone",
+    # view or reshape
+    "view", "expand", "repeat", "reshape", "transpose", "as_strided", "scatter", "scatter_", "chunk", "squeeze", "unsqueeze", "unbind", "permute", "split", "flip", "index_select", 
+    ]
+})
+# torch
+old_functions.update({
+    (torch, func): False for func in [
+        # comparison
+        "eq", "ge", "gt", "le", "lt", "ne", "all", "any", "min", "max", "where", "isfinite", 
+        "greater_equal", "greater", "less_equal", "less", "not_equal", 
+        # normalization, see QA.md for more detail
+        "batch_norm", "group_norm", "instance_norm", "layer_norm", 
+        # shape-related
+        "cat", "stack", "vstack", "hstack", "sstack", "row_stack", "column_stack", "slice", "chunk", "flip", 
+        # creation
+        "empty_like", "full_like", "ones_like", "randn_like", "zeros_like", 
+        # info
+        "numel", 
+        # other
+        "embedding", 
+    ]
 })
 
 
