@@ -906,7 +906,11 @@ def _tensor_addmm_flops_compute(self, mat1, mat2, *, beta=1, alpha=1, out=None):
     return (macs << 1) + _prod(self.shape), macs
 
 
-def _elementwise_flops_compute(input, other, *args, **kwargs):
+def _elementwise_flops_compute(input, *args, **kwargs):
+    other = kwargs.get("other", kwargs.get("exponent"))
+    if args:
+        other = args[0]
+    assert other is not None, "_elementwise_flops_compute applies on a function in a wrong way"
     if not torch.is_tensor(input):
         if torch.is_tensor(other):
             return _prod(other.shape), 0
