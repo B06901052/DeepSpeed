@@ -8,6 +8,8 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import itertools
+from flops_profiler.utils import *
 
 old_functions = {}
 try:
@@ -187,10 +189,8 @@ class FlopsProfiler(object):
 
             def post_hook(module, input, output):
                 if module_flop_count:
-                    module.__flops__ += sum([elem[1] for elem in module_flop_count[-1]])
-                    module_flop_count.pop()
-                    module.__macs__ += sum([elem[1] for elem in module_mac_count[-1]])
-                    module_mac_count.pop()
+                    module.__flops__ += sum(elem[1] for elem in module_flop_count.pop())
+                    module.__macs__ += sum(elem[1] for elem in module_mac_count.pop())
 
             module.__post_hook_handle__ = module.register_forward_hook(post_hook)
 
@@ -225,21 +225,11 @@ class FlopsProfiler(object):
             if isinstance(module, torch.jit.ScriptModule):
                 logger.error("can't remove attr from SriptModule {}".format(module))
                 return
-            if hasattr(module, "__pre_hook_handle__"):
-                module.__pre_hook_handle__.remove()
-                del module.__pre_hook_handle__
-            if hasattr(module, "__post_hook_handle__"):
-                module.__post_hook_handle__.remove()
-                del module.__post_hook_handle__
-            if hasattr(module, "__flops_handle__"):
-                module.__flops_handle__.remove()
-                del module.__flops_handle__
-            if hasattr(module, "__start_time_hook_handle__"):
-                module.__start_time_hook_handle__.remove()
-                del module.__start_time_hook_handle__
-            if hasattr(module, "__end_time_hook_handle__"):
-                module.__end_time_hook_handle__.remove()
-                del module.__end_time_hook_handle__
+            for name in ["pre_hook", "post_hook", "flops", "start_time_hook", "end_time_hook"]:
+                name = f"__{name}_handle__"
+                if hasattr(module, name):
+                    getattr(module, name).remove()
+                    delattr(module, name)
 
         self.model.apply(remove_profile_attrs)
 
@@ -273,16 +263,10 @@ class FlopsProfiler(object):
             if isinstance(module, torch.jit.ScriptModule):
                 logger.error("can't remove attr from SriptModule {}".format(module))
                 return
-            if hasattr(module, "__flops__"):
-                del module.__flops__
-            if hasattr(module, "__macs__"):
-                del module.__macs__
-            if hasattr(module, "__params__"):
-                del module.__params__
-            if hasattr(module, "__start_time__"):
-                del module.__start_time__
-            if hasattr(module, "__duration__"):
-                del module.__duration__
+            for name in ["flops", "macs", "params", "start_time", "duration"]:
+                name = f"__{name}__"
+                if hasattr(module, name):
+                    delattr(module, name)
 
         self.model.apply(remove_profile_attrs)
 
@@ -355,7 +339,6 @@ class FlopsProfiler(object):
             return
         import sys
         import os.path
-        from os import path
         original_stdout = None
         f = None
         if output_file and output_file != "":
@@ -495,21 +478,20 @@ class FlopsProfiler(object):
 
         if detailed:
             print(
-                "\n------------------------------ Detailed Profile per GPU ------------------------------"
-            )
-            print(
-                "Each module profile is listed after its name in the following order: \nparams, percentage of total params, MACs, percentage of total MACs, fwd latency, percentage of total fwd latency, fwd FLOPS"
-            )
-            print(
-                "\nNote: 1. A module can have torch.nn.module or torch.nn.functional to compute logits (e.g. CrossEntropyLoss). They are not counted as submodules, thus not to be printed out. However they make up the difference between a parent's MACs (or latency) and the sum of its submodules'.\n2. Number of floating-point operations is a theoretical estimation, thus FLOPS computed using that could be larger than the maximum system throughput.\n3. The fwd latency listed in the top module's profile is directly captured at the module forward function in PyTorch, thus it's less than the fwd latency shown above which is captured in DeepSpeed.\n"
+                "\n".join([
+                    "\n------------------------------ Detailed Profile per GPU ------------------------------",
+                    "Each module profile is listed after its name in the following order:",
+                    "params, percentage of total params, MACs, percentage of total MACs, fwd latency, percentage of total fwd latency, fwd FLOPS\n",
+                    "Note: 1. A module can have torch.nn.module or torch.nn.functional to compute logits (e.g. CrossEntropyLoss). They are not counted as submodules, thus not to be printed out. However they make up the difference between a parent's MACs (or latency) and the sum of its submodules'."
+                    "2. Number of floating-point operations is a theoretical estimation, thus FLOPS computed using that could be larger than the maximum system throughput."
+                    "3. The fwd latency listed in the top module's profile is directly captured at the module forward function in PyTorch, thus it's less than the fwd latency shown above which is captured in DeepSpeed.\n"
+                ])
             )
             print(self.model)
 
         self.model.apply(del_extra_repr)
 
-        print(
-            "------------------------------------------------------------------------------"
-        )
+        print("-" * 78)
 
         if output_file:
             sys.stdout = original_stdout
@@ -555,35 +537,17 @@ class FlopsProfiler(object):
 
         for d in range(depth):
             num_items = min(top_modules, len(info[d]))
+            
+            result = [None] * 4
+            for i, func in enumerate([macs_to_string, params_to_string, duration_to_string, flops_to_string]):
+                result[i] = {
+                    k: func(v[i], precision=self.precision)
+                    for k, v in sorted(info[d].items(),
+                                key=lambda item: item[1][i],
+                                reverse=True)[:num_items]
+                }
 
-            sort_macs = {
-                k: macs_to_string(v[0], precision=self.precision)
-                for k,
-                v in sorted(info[d].items(),
-                            key=lambda item: item[1][0],
-                            reverse=True)[:num_items]
-            }
-            sort_params = {
-                k: params_to_string(v[1], precision=self.precision)
-                for k,
-                v in sorted(info[d].items(),
-                            key=lambda item: item[1][1],
-                            reverse=True)[:num_items]
-            }
-            sort_time = {
-                k: duration_to_string(v[2], precision=self.precision)
-                for k,
-                v in sorted(info[d].items(),
-                            key=lambda item: item[1][2],
-                            reverse=True)[:num_items]
-            }
-            sort_flops = {
-                k: flops_to_string(v[3], precision=self.precision)
-                for k,
-                v in sorted(info[d].items(),
-                            key=lambda item: item[1][3],
-                            reverse=True)[:num_items]
-            }
+            sort_macs, sort_params, sort_time, sort_flops = result
 
             print(f"depth {d}:")
             print(f"    params      - {sort_params}")
@@ -599,56 +563,19 @@ def _prod(dims):
         p *= v
     return p
 
-# for passing the computed value
-def _zero_flops_compute(*args, **kwargs):
-    return 0, 0
 
 def _linear_flops_compute(input, weight, bias=None):
     out_features = weight.shape[0]
-    macs = torch.numel(input) * out_features
+    macs = input.numel() * out_features
     return 2 * macs, macs
 
 
-def _relu_flops_compute(input, inplace=False):
-    return torch.numel(input), 0
+def _xlu_flops_compute(input, *args, **kwargs):
+    return input.numel(), 0
 
 
-def _prelu_flops_compute(input: Tensor, weight: Tensor):
-    return torch.numel(input), 0
-
-
-def _elu_flops_compute(input: Tensor, alpha: float = 1.0, inplace: bool = False):
-    return torch.numel(input), 0
-
-
-def _leaky_relu_flops_compute(input: Tensor,
-                              negative_slope: float = 0.01,
-                              inplace: bool = False):
-    return torch.numel(input), 0
-
-
-def _relu6_flops_compute(input: Tensor, inplace: bool = False):
-    return torch.numel(input), 0
-
-
-def _silu_flops_compute(input: Tensor, inplace: bool = False):
-    return torch.numel(input), 0
-
-
-def _gelu_flops_compute(input):
-    return torch.numel(input), 0
-
-
-def _pool_flops_compute(
-    input,
-    kernel_size,
-    stride=None,
-    padding=0,
-    ceil_mode=False,
-    count_include_pad=True,
-    divisor_override=None,
-):
-    return torch.numel(input), 0
+def _pool_flops_compute(input, *args, **kwargs):
+    return input.numel(), 0
 
 
 def _conv_flops_compute(input,
@@ -747,12 +674,14 @@ def _batch_norm_flops_compute(
     momentum=0.1,
     eps=1e-05,
 ):
-    has_affine = weight is not None
+    factor = 1
+    # has_affine
+    if weight is not None:
+        factor += 1
+    # estimation
     if training:
-        # estimation
-        return torch.numel(input) * (5 if has_affine else 4), 0
-    flops = torch.numel(input) * (2 if has_affine else 1)
-    return flops, 0
+        factor += 3
+    return input.numel() * factor, 0
 
 
 def _layer_norm_flops_compute(
@@ -764,7 +693,7 @@ def _layer_norm_flops_compute(
 ):
     has_affine = weight is not None
     # estimation
-    return torch.numel(input) * (5 if has_affine else 4), 0
+    return input.numel() * (5 if has_affine else 4), 0
 
 
 def _group_norm_flops_compute(input: Tensor,
@@ -774,7 +703,7 @@ def _group_norm_flops_compute(input: Tensor,
                               eps: float = 1e-5):
     has_affine = weight is not None
     # estimation
-    return torch.numel(input) * (5 if has_affine else 4), 0
+    return input.numel() * (5 if has_affine else 4), 0
 
 
 def _instance_norm_flops_compute(
@@ -789,7 +718,7 @@ def _instance_norm_flops_compute(
 ):
     has_affine = weight is not None
     # estimation
-    return torch.numel(input) * (5 if has_affine else 4), 0
+    return input.numel() * (5 if has_affine else 4), 0
 
 
 def _upsample_flops_compute(input,
@@ -797,38 +726,26 @@ def _upsample_flops_compute(input,
                             scale_factor=None,
                             mode="nearest",
                             align_corners=None):
-    if size is not None:
-        if isinstance(size, tuple):
-            return int(_prod(size)), 0
-        else:
-            return int(size), 0
+    if isinstance(size, tuple):
+        return int(_prod(size)), 0
+    elif size:
+        return int(size), 0
     assert scale_factor is not None, "either size or scale_factor should be defined"
-    flops = torch.numel(input)
-    if isinstance(scale_factor, tuple) and len(scale_factor) == len(input):
-        flops * int(_prod(scale_factor))
+    flops = input.numel()
+    if isinstance(scale_factor, tuple) and len(scale_factor) == input.dim():
+        flops *= int(_prod(scale_factor))
     else:
-        flops * scale_factor**len(input)
+        flops *= scale_factor**input.dim()
     return flops, 0
 
 
-def _softmax_flops_compute(input, dim=None, **kwargs):
-    return torch.numel(input), 0
+def _softmax_flops_compute(input, *args, **kwargs):
+    return input.numel() * 3, 0 # exp, sum, div
 
 
-def _embedding_flops_compute(
-    input,
-    weight,
-    padding_idx=None,
-    max_norm=None,
-    norm_type=2.0,
-    scale_grad_by_freq=False,
-    sparse=False,
-):
-    return 0, 0
-
-
-def _dropout_flops_compute(input, p=0.5, training=True, inplace=False):
-    return 0, 0
+def _scatter_add_flops_compute(index, *args, **kwargs):
+    result = index.numel()
+    return result, result >> 1
 
 
 def _multi_head_attention_forward_flops_compute(
@@ -861,7 +778,7 @@ def _multi_head_attention_forward_flops_compute(
     """
     Count flops for torch.nn.functional.multi_head_attention_forward
     """
-    assert query.dim() == 2 or query.dim() == 3
+    assert query.dim() in [2, 3]
     assert query.dim() == key.dim()
     assert query.dim() == value.dim()
 
@@ -890,14 +807,14 @@ def _multi_head_attention_forward_flops_compute(
     if not use_separate_proj_weight:
         # using in_proj_weight, which is of shape (3E, E), where E = embed_dim.
         n = query.numel() * embed_dim + 2 * key.numel() * embed_dim
-        flops += 2 * n
+        flops += n << 1
         macs += n
     else:
         n = (
             query.numel() * q_proj_weight.shape[0]
             + 2 * key.numel() * k_proj_weight.shape[0]
         )
-        flops += 2 * n
+        flops += n << 1
         macs += n
 
     if in_proj_bias is not None:
@@ -911,7 +828,7 @@ def _multi_head_attention_forward_flops_compute(
 
     # q * k^T (bmm)
     n = batch_size * num_heads * src_len * tgt_len * head_dim
-    flops += 2 * n
+    flops += n << 1
     macs += n
 
     # attn_mask
@@ -922,7 +839,7 @@ def _multi_head_attention_forward_flops_compute(
     # softmax
     n = batch_size * num_heads * src_len * tgt_len
     flops += 3 * n
-    macs += 2 * n
+    macs += n << 1
 
     # dropout
     if dropout_p > 0.0:
@@ -932,12 +849,12 @@ def _multi_head_attention_forward_flops_compute(
 
     # attn * v
     n = batch_size * num_heads * src_len * tgt_len * head_dim
-    flops += 2 * n
+    flops += n << 1
     macs += n
 
     # out-projection
     n = batch_size * tgt_len * embed_dim * out_proj_weight.shape[0]
-    flops += 2 * n
+    flops += n << 1
     macs += n
 
     return flops, macs
@@ -948,7 +865,7 @@ def _matmul_flops_compute(input, other, *, out=None):
     Count flops for the matmul operation.
     """
     macs = _prod(input.shape) * other.shape[-1]
-    return 2 * macs, macs
+    return macs << 1, macs
 
 
 def _addmm_flops_compute(input, mat1, mat2, *, beta=1, alpha=1, out=None):
@@ -956,7 +873,7 @@ def _addmm_flops_compute(input, mat1, mat2, *, beta=1, alpha=1, out=None):
     Count flops for the addmm operation.
     """
     macs = _prod(mat1.shape) * mat2.shape[-1]
-    return 2 * macs + _prod(input.shape), macs
+    return (macs << 1) + _prod(input.shape), macs
 
 
 def _einsum_flops_compute(equation, *operands):
@@ -986,7 +903,7 @@ def _tensor_addmm_flops_compute(self, mat1, mat2, *, beta=1, alpha=1, out=None):
     Count flops for the tensor addmm operation.
     """
     macs = _prod(mat1.shape) * mat2.shape[-1]
-    return 2 * macs + _prod(self.shape), macs
+    return (macs << 1) + _prod(self.shape), macs
 
 
 def _elementwise_flops_compute(input, other, *args, **kwargs):
@@ -1223,14 +1140,9 @@ def _patch_nn_functionals():
     F.conv_transpose3d = wrapFunc(F, F.conv_transpose3d, "conv_transpose3d", _conv_trans_flops_compute)
 
     # activations
-    F.relu = wrapFunc(F, F.relu, "relu", _relu_flops_compute)
-    F.prelu = wrapFunc(F, F.prelu, "prelu", _prelu_flops_compute)
-    F.elu = wrapFunc(F, F.elu, "elu", _elu_flops_compute)
-    F.leaky_relu = wrapFunc(F, F.leaky_relu, "leaky_relu", _leaky_relu_flops_compute)
-    F.relu6 = wrapFunc(F, F.relu6, "relu6", _relu6_flops_compute)
-    if hasattr(F, "silu"):
-        F.silu = wrapFunc(F, F.silu, "silu", _silu_flops_compute)
-    F.gelu = wrapFunc(F, F.gelu, "gelu", _gelu_flops_compute)
+    for name in ["relu", "prelu", "elu", "leaky_relu", "relu6", "silu", "gelu"]:
+        if hasattr(F, name):
+            setattr(F, name, wrapFunc(F, getattr(F, name), name, _xlu_flops_compute))
 
     # Normalizations
     F.batch_norm = wrapFunc(F, F.batch_norm, "batch_norm", _batch_norm_flops_compute)
@@ -1239,18 +1151,13 @@ def _patch_nn_functionals():
     F.group_norm = wrapFunc(F, F.group_norm, "group_norm", _group_norm_flops_compute)
 
     # poolings
-    F.avg_pool1d = wrapFunc(F, F.avg_pool1d, "avg_pool1d", _pool_flops_compute)
-    F.avg_pool2d = wrapFunc(F, F.avg_pool2d, "avg_pool2d", _pool_flops_compute)
-    F.avg_pool3d = wrapFunc(F, F.avg_pool3d, "avg_pool3d", _pool_flops_compute)
-    F.max_pool1d = wrapFunc(F, F.max_pool1d, "max_pool1d", _pool_flops_compute)
-    F.max_pool2d = wrapFunc(F, F.max_pool2d, "max_pool2d", _pool_flops_compute)
-    F.max_pool3d = wrapFunc(F, F.max_pool3d, "max_pool3d", _pool_flops_compute)
-    F.adaptive_avg_pool1d = wrapFunc(F, F.adaptive_avg_pool1d, "adaptive_avg_pool1d", _pool_flops_compute)
-    F.adaptive_avg_pool2d = wrapFunc(F, F.adaptive_avg_pool2d, "adaptive_avg_pool2d", _pool_flops_compute)
-    F.adaptive_avg_pool3d = wrapFunc(F, F.adaptive_avg_pool3d, "adaptive_avg_pool3d", _pool_flops_compute)
-    F.adaptive_max_pool1d = wrapFunc(F, F.adaptive_max_pool1d, "adaptive_max_pool1d", _pool_flops_compute)
-    F.adaptive_max_pool2d = wrapFunc(F, F.adaptive_max_pool2d, "adaptive_max_pool2d", _pool_flops_compute)
-    F.adaptive_max_pool3d = wrapFunc(F, F.adaptive_max_pool3d, "adaptive_max_pool3d", _pool_flops_compute)
+    pools = map(lambda x: "".join(x), itertools.product(
+        ["", "adaptive_"], ["avg_", "max_"], ["pool1d", 'pool2d', 'pool3d']
+    ))
+    for pool in pools:
+        setattr(F, pool, wrapFunc(F, getattr(F, pool), pool, _pool_flops_compute))
+        if hasattr(torch._C._nn, pool):
+            setattr(torch._C._nn, pool, wrapFunc(torch._C._nn, getattr(torch._C._nn, pool), pool, _pool_flops_compute))
 
     # upsample
     F.upsample = wrapFunc(F, F.upsample, "upsample", _upsample_flops_compute)
@@ -1258,9 +1165,6 @@ def _patch_nn_functionals():
 
     # softmax
     F.softmax = wrapFunc(F, F.softmax, "softmax", _softmax_flops_compute)
-
-    # embedding
-    F.embedding = wrapFunc(F, F.embedding, "embedding", _embedding_flops_compute)
 
     # multi_head_attention_forward
     F.multi_head_attention_forward = wrapFunc(
@@ -1299,11 +1203,16 @@ def _patch_tensor_methods():
     torch.Tensor.softmax = wrapFunc(torch.Tensor, torch.Tensor.softmax, "softmax", _softmax_flops_compute)
     
     # activations
-    torch.relu = wrapFunc(torch, torch.relu, "relu", _relu_flops_compute)
-    torch.prelu = wrapFunc(torch, torch.prelu, "prelu", _prelu_flops_compute)
+    torch.relu = wrapFunc(torch, torch.relu, "relu", _xlu_flops_compute)
+    torch.Tensor.relu = wrapFunc(torch.Tensor, torch.Tensor.relu, "relu", _xlu_flops_compute)
+    torch.prelu = wrapFunc(torch, torch.prelu, "prelu", _xlu_flops_compute)
     
-    ops = ["add", "sub", "mul", "truediv", "floordiv", "div", "pow"]
-    for op in ops:
+    # others
+    torch.scatter_add = wrapFunc(torch, torch.scatter_add, "scatter_add", _scatter_add_flops_compute)
+    torch.Tensor.scatter_add = wrapFunc(torch.Tensor, torch.Tensor.scatter_add, "scatter_add", _scatter_add_flops_compute)
+    torch.Tensor.scatter_add_ = wrapFunc(torch.Tensor, torch.Tensor.scatter_add_, "scatter_add_", _scatter_add_flops_compute)
+    
+    for op in ["add", "sub", "mul", "truediv", "floordiv", "div", "pow"]:
         # syntax sugar
         sugar_op = "__{}__".format(op)
         setattr(torch.Tensor, sugar_op, wrapFunc(torch.Tensor, getattr(torch.Tensor, sugar_op), sugar_op, _elementwise_flops_compute))
@@ -1322,8 +1231,7 @@ def _patch_tensor_methods():
         setattr(torch.Tensor, op, wrapFunc(torch.Tensor, getattr(torch.Tensor, op), op, _elementwise_flops_compute))
 
     # alias
-    ops = ["subtract", "multiply", "divide"]
-    for op in ops:
+    for op in ["subtract", "multiply", "divide"]:
         setattr(torch, op, wrapFunc(torch, getattr(torch, op), op, _elementwise_flops_compute))
         setattr(torch.Tensor, op, wrapFunc(torch.Tensor, getattr(torch.Tensor, op), op, _elementwise_flops_compute))
         
@@ -1397,6 +1305,8 @@ def _patch_tensor_methods():
         # Reduction Ops (https://pytorch.org/docs/stable/torch.html#reduction-ops)
         "mean": {"flop_multiplier": 1, "flop_bias": 0},
         "sum": {"flop_multiplier": 1, "flop_bias": -1},
+        "cumsum": {"flop_multiplier": 1, "flop_bias": -1},
+        "cumsum_": {"flop_multiplier": 1, "flop_bias": -1},
         "var": {"flop_multiplier": 4, "flop_bias": 0, "has_correction": True},# mean(N), sub(N), pow(N), sum(N-1), avg(1)
         "var_mean": {"flop_multiplier": 4, "flop_bias": 0, "has_correction": True},
         "std": {"flop_multiplier": 4, "flop_bias": 1, "has_correction": True},
@@ -1412,7 +1322,8 @@ def _patch_tensor_methods():
             has_correction=math_ops[op].get("has_correction", False)
         )
         # torch.op
-        setattr(torch, op, wrapFunc(torch, getattr(torch, op), op, funcFlopCompute))
+        if hasattr(torch, op):
+            setattr(torch, op, wrapFunc(torch, getattr(torch, op), op, funcFlopCompute))
         # torch.Tensor.op
         if op in not_in_tensor:
             continue
@@ -1511,73 +1422,10 @@ def _rnn_cell_forward_hook(rnn_cell_module, input, output):
     rnn_cell_module.__macs__ += int(flops) >> 1
 
 
+# RNN
 MODULE_HOOK_MAPPING = {
-    # RNN
-    nn.RNN: _rnn_forward_hook,
-    nn.GRU: _rnn_forward_hook,
-    nn.LSTM: _rnn_forward_hook,
-    nn.RNNCell: _rnn_cell_forward_hook,
-    nn.LSTMCell: _rnn_cell_forward_hook,
-    nn.GRUCell: _rnn_cell_forward_hook,
+    m: _rnn_cell_forward_hook for m in [nn.RNN, nn.GRU, nn.LSTM, nn.RNNCell, nn.LSTMCell, nn.GRUCell]
 }
-
-def _num_to_string(num, units=None, precision=2, unit="", order_names=["", "K", "M", "G", "T"], bias=0):
-    order = int(min(max(np.log10(num)/3 + bias if num else 0, 0), len(order_names)-1))
-        
-    num *= 1000**(bias-order)
-    if units is None:
-        units = order_names[order] + unit
-    
-    return str(round(num, precision)) + " " + units
-
-def num_to_string(num, precision=2):
-    return _num_to_string(num, precision=precision, order_names=["", "K", "M", "G"])
-
-
-def macs_to_string(macs, units=None, precision=2):
-    return _num_to_string(macs, units=units, precision=precision, unit="MACs")
-
-
-def number_to_string(num, units=None, precision=2):
-    return _num_to_string(num, units=units, precision=precision)
-
-
-def flops_to_string(flops, units=None, precision=2):
-    return _num_to_string(flops, units=units, precision=precision, unit="FLOPs")
-
-
-def params_to_string(params_num, units=None, precision=2):
-    return _num_to_string(params_num, units=units, precision=precision, order_names=["", "k", "M", "G"])
-
-
-def duration_to_string(duration, units=None, precision=2):
-    return _num_to_string(duration, units=units, precision=precision, order_names=["n", "u", "m", ""], bias=3, unit="s")
-
-
-    # can not iterate over all submodules using self.model.modules()
-    # since modules() returns duplicate modules only once
-def get_module_flops(module):
-    sum = module.__flops__
-    # iterate over immediate children modules
-    for child in module.children():
-        sum += get_module_flops(child)
-    return sum
-
-
-def get_module_macs(module):
-    sum = module.__macs__
-    # iterate over immediate children modules
-    for child in module.children():
-        sum += get_module_macs(child)
-    return sum
-
-
-def get_module_duration(module):
-    duration = module.__duration__
-    if duration == 0:  # e.g. ModuleList
-        for m in module.children():
-            duration += m.__duration__
-    return duration
 
 
 def get_model_profile(
