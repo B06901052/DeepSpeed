@@ -14,8 +14,11 @@ old_functions = {}
 try:
     import torchaudio
     old_functions.update({
-        (torchaudio.compliance.kaldi, "Tensor"): False,
-        (torchaudio.compliance.kaldi, "Tuple"): False,
+        (torchaudio.compliance.kaldi, func): False for func in [
+            "Tensor", "Tuple",
+            "_next_power_of_2", "_get_waveform_and_window_properties", "_get_epsilon", "_get_strided",
+            "inverse_mel_scale_scalar", "mel_scale_scalar",
+        ]
     })
 except ModuleNotFoundError:
     pass
@@ -170,24 +173,26 @@ class FlopsProfiler(object):
             pass
 
         def register_module_hooks(module, ignore_list):
-            if ignore_list and type(module) in ignore_list:
-                return
-
-            # if computing the flops of a module directly
-            if type(module) in MODULE_HOOK_MAPPING:
-                module.__flops_handle__ = module.register_forward_hook(
-                    MODULE_HOOK_MAPPING[type(module)])
-                return
-
-            # if computing the flops of the functionals in a module
             def pre_hook(module, input):
                 module_flop_count.append([])
                 module_mac_count.append([])
 
             module.__pre_hook_handle__ = module.register_forward_pre_hook(pre_hook)
-
-            def post_hook(module, input, output):
-                if module_flop_count:
+                    
+            # if computing the flops of a module directly
+            if type(module) in MODULE_HOOK_MAPPING:
+                def post_hook(module, input, output):
+                    module_flop_count.pop()
+                    module_mac_count.pop()
+                    MODULE_HOOK_MAPPING[type(module)](module, input, output)
+            # if ignore the module
+            elif ignore_list and type(module) in ignore_list:
+                def post_hook(module, input, output):
+                    module_flop_count.pop()
+                    module_mac_count.pop()
+            # if computing the flops of the functionals in a module
+            else:
+                def post_hook(module, input, output):
                     module.__flops__ += sum(elem[1] for elem in module_flop_count.pop())
                     module.__macs__ += sum(elem[1] for elem in module_mac_count.pop())
 
@@ -993,10 +998,8 @@ def wrapFunc(module, func, name, funcFlopCompute):
         flops, macs = funcFlopCompute(*args, **kwds)
         logger.log(logging.SHOWFUNC, f"MACs: {macs}")
         
-        if module_flop_count:
-            module_flop_count[-1].append((name, flops))
-        if module_mac_count and macs:
-            module_mac_count[-1].append((name, macs))
+        module_flop_count[-1].append((name, flops))
+        module_mac_count[-1].append((name, macs))
             
         flop_len = len(module_flop_count[-1])
         mac_len = len(module_mac_count[-1])
@@ -1022,12 +1025,10 @@ def wrapFunc(module, func, name, funcFlopCompute):
         flops, macs = funcFlopCompute(*args, **kwds)
         
         # remove redundant count
-        if module_flop_count:
-            module_flop_count[-1] = module_flop_count[-1][:flop_len]
-            module_flop_count[-1].append((name, flops))
-        if module_mac_count:
-            module_mac_count[-1] = module_mac_count[-1][:mac_len]
-            module_mac_count[-1].append((name, macs))
+        module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        module_flop_count[-1].append((name, flops))
+        module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        module_mac_count[-1].append((name, macs))
         
         return result
 
@@ -1049,18 +1050,14 @@ def wrapWarning(module, func, name):
     def newFunc(*args, **kwds):
         warning_msg.add("forward an unimplemented function: {}.{}".format(getattr(module, "__name__", module), name))
 
-        if module_flop_count:
-            flop_len = len(module_flop_count[-1])
-        if module_mac_count:
-            mac_len = len(module_mac_count[-1])
+        flop_len = len(module_flop_count[-1])
+        mac_len = len(module_mac_count[-1])
             
         result = func(*args, **kwds)
         
         # remove redundant count
-        if module_flop_count:
-            module_flop_count[-1] = module_flop_count[-1][:flop_len]
-        if module_mac_count:
-            module_mac_count[-1] = module_mac_count[-1][:mac_len]
+        module_flop_count[-1] = module_flop_count[-1][:flop_len]
+        module_mac_count[-1] = module_mac_count[-1][:mac_len]
         return result
     
 
