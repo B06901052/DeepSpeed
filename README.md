@@ -56,15 +56,25 @@ For the modules below, they will raise a warning while your model forwards a fun
   - basic statistics, e.g. mean, var, std
 - Fix bug
   - incorrect # of ops for conv1d and conv3d
+  - If a module/function has an estimation formula, and some submodule/function/operators in it also have estimation formula, the number of operation will count twice or more.
 - Add `testing/unit_profiling_test.py` for unit test of module, function, or operation
 
 ## Usage
 
 ### Setup
 
+- clone the specified branch of this repo
+
 ```bash
 # clone the branch that only contains profiling tool in our fork
 git clone -b superb-challenge --single-branch git@github.com:B06901052/DeepSpeed.git
+```
+
+- download the test-clean split in LibriSpeech Dataset
+
+```bash
+wget https://www.openslr.org/resources/12/test-clean.tar.gz
+tar -xzvf test-clean.tar.gz
 ```
 
 ### Profiling an upstream in s3prl
@@ -75,6 +85,30 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
 ```
 
 - The detailed result will be placed in `testing/log/{s3prl_upstream_name}.txt`
+
+#### Advance profiiling
+
+- **rough time**: rough time simply count the execution time from the start of profiling to the end. It could be affected by:
+  - gpu asynchronize within each batch
+  - hooks (those formulas for counting number of operations)
+
+##### Profile the execution time for each module in your model
+
+- This mode will compute execution for each module in your model, but since it need to synchronize after each module forward, which will disable some parallelism and cause longer execution in total.
+
+```bash
+cd repo-path
+python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "libri_root" --show_time
+```
+
+##### Profile a more precise execution time for your model
+
+- This execution time eliminates those hooks, do `torch.cuda.synchronize()` after every forward, and compute 10 times for each batch to compute the average time.
+
+```bash
+cd repo-path
+python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "libri_root" --execution_time_only
+```
 
 ### Profiling your model
 
@@ -97,7 +131,7 @@ python testing/s3prl_profiling_test.py -u "s3prl_upstream_name" --libri_root "li
   python testing/s3prl_profiling_test.py -u "your_model_name" --libri_root "libri_root"
   ```
 
-- Report the **params** and **sum of macs** to superb challenge, like the result of hubert_base as below:
+- Report the **params** and **sum of macs** to superb challenge, like the result of hubert_base as below. And if it says that there are untracked functions in your model, make sure all of them could be ignored.
 
   ```bash
   [s3prl_profiling_test] INFO - bucket short: 1.28~3.44 sec

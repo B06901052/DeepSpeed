@@ -62,6 +62,7 @@ wav_paths = [
 # args
 def get_profiling_args():
     parser=argparse.ArgumentParser()
+    # upstream
     upstreams=[attr for attr in dir(hub) if attr[0] != '_']
     parser.add_argument('-u', '--upstream', default="hubert", help="This is also the filename of logfile")
     parser.add_argument('--upstream_ckpt', default="", help="The ckpt path for upstream")
@@ -70,18 +71,22 @@ def get_profiling_args():
     parser.add_argument('--hf_org_name', type=str)
     parser.add_argument('--hf_repo_name', type=str)
     parser.add_argument('--hf_revision', type=str)
+    # profiling setup
     parser.add_argument('-b', '--batch_size', type=int, default=1, help="only for pseudo input")
     parser.add_argument('-l', '--seq_len', type=int, default=160000, help="only for pseudo input")
     parser.add_argument("--sample_rate", type=float, default=16000., help="The input sample rate")
+    parser.add_argument("--pseudo_input", action="store_true", help="use torch.randn to generate pseudo input")
     parser.add_argument('-d', "--device", default="cuda")
+    # information present
     parser.add_argument('-s', "--show_untracked", help="Show all untracked functions in torch and torchaudio.", action="store_true")
     parser.add_argument("--show_time", help="Show time related info.", action="store_true")
+    parser.add_argument("--execution_time_only", help="Show execution time only (currently only support cuda)", action="store_true")
     parser.add_argument("-p", "--precision", type=int, default=2)
-    parser.add_argument("--libri_root", type=str, default="/mnt/diskb/corpora/LibriSpeech/", help="The root dir of LibriSpeech")
-    parser.add_argument("--log_path", type=str, help="The path for log file storing. (not include file name)", default=os.path.join(os.path.dirname(__file__), "log/"))
-    parser.add_argument("--pseudo_input", action="store_true", help="use torch.randn to generate pseudo input")
     parser.add_argument("--as_string", action="store_true", help="print result as formated string")
     parser.add_argument("--without_bucket", action="store_true", help="not divide inputs into four buckets by sequence length and report the result seperately")
+    # path
+    parser.add_argument("--libri_root", type=str, default="/mnt/diskb/corpora/LibriSpeech/", help="The root dir of LibriSpeech")
+    parser.add_argument("--log_path", type=str, help="The path for log file storing. (not include file name)", default=os.path.join(os.path.dirname(__file__), "log/"))
     return parser.parse_args()
 
 
@@ -157,7 +162,8 @@ def superb_profiling(
         samples = [load_wav(path, args.device, dtype) for path in wav_paths]
         
         # profiling start
-        prof = FlopsProfiler(model, show_untracked=args.show_untracked, show_time=args.show_time, precision=args.precision)
+        if not args.execution_time_only:
+            prof = FlopsProfiler(model, show_untracked=args.show_untracked, show_time=args.show_time, precision=args.precision)
 
         # warnup
         pseudo_inputs = s3prl_input_constructor(args.batch_size, args.seq_len, args.device, dtype)
@@ -170,84 +176,120 @@ def superb_profiling(
                 min_sec = samples[i<<3][0].shape[0] / args.sample_rate
                 max_sec = samples[(i<<3)|7][0].shape[0] / args.sample_rate
                 logger.info("bucket {}: {:.2f}~{:.2f} sec".format(bucket, min_sec, max_sec))
-                prof.start_profile(ignore_modules)
                 
-                torch.cuda.synchronize()
-                t = time()
-                pre_macs = 0
-                macs_per_seq_len = []
+                if args.execution_time_only:
+                    t = 0
+                else:
+                    prof.start_profile(ignore_modules)
+                    torch.cuda.synchronize()
+                    pre_macs = 0
+                    macs_per_seq_len = []
+                    t = time()
                 for inputs in samples[i<<3:(i+1)<<3]:
-                    _ = model(inputs, *model_args, **model_kwargs)
-                    cur_macs = prof.get_total_macs()
-                    macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
-                    pre_macs = cur_macs
+                    if args.execution_time_only:
+                        for _ in range(10):
+                            start = torch.cuda.Event(enable_timing=True)
+                            end = torch.cuda.Event(enable_timing=True)
+                            start.record()
+                            _ = model(inputs, *model_args, **model_kwargs)
+                            end.record()
+                            torch.cuda.synchronize()
+                            t += start.elapsed_time(end)
+                    else:
+                        _ = model(inputs, *model_args, **model_kwargs)
+                        cur_macs = prof.get_total_macs()
+                        macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
+                        pre_macs = cur_macs
 
-                flops = prof.get_total_flops()
-                macs = prof.get_total_macs()
-                params = prof.get_total_params()
-                prof.print_model_profile(
-                    profile_step=10,
-                    top_modules=3,
-                    output_file=os.path.join(args.log_path, "{}_{}.txt".format(args.upstream, bucket)),
-                    device=args.device,
-                    input_shape=[i[0].shape for i in samples[i<<3:(i+1)<<3]]
-                )
+                if args.execution_time_only:
+                    # summary
+                    logger.info(f"execution time: {t/1000/10:.4f}sec\n") # /1000 is for ms to s, /10 is for average
+                else:
+                    torch.cuda.synchronize()
+                    t = time() - t
+                    flops = prof.get_total_flops()
+                    macs = prof.get_total_macs()
+                    params = prof.get_total_params()
+                    prof.print_model_profile(
+                        profile_step=10,
+                        top_modules=3,
+                        output_file=os.path.join(args.log_path, "{}_{}.txt".format(args.upstream, bucket)),
+                        device=args.device,
+                        input_shape=[i[0].shape for i in samples[i<<3:(i+1)<<3]]
+                    )
                 
-                torch.cuda.synchronize()
-                t = time() - t
 
-                prof.end_profile()
+                    prof.end_profile()
                 
-                M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
-                if args.as_string:
-                    flops = number_to_string(flops, precision=args.precision)
-                    macs = macs_to_string(macs, precision=args.precision)
-                    params = params_to_string(params, precision=args.precision)
-                    M = macs_to_string(M) + " / sec of an audio"
-                    m = macs_to_string(m) + " / sec of an audio"
+                    M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
+                    if args.as_string:
+                        flops = number_to_string(flops, precision=args.precision)
+                        macs = macs_to_string(macs, precision=args.precision)
+                        params = params_to_string(params, precision=args.precision)
+                        M = macs_to_string(M) + " / sec of an audio"
+                        m = macs_to_string(m) + " / sec of an audio"
 
-                # summary
-                logger.info(f"summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
+                    # summary
+                    logger.info(f"summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
                 
         # profile all
         min_sec = samples[0][0].shape[0] / args.sample_rate
         max_sec = samples[-1][0].shape[0] / args.sample_rate
         logger.info("bucket all: {:.2f}~{:.2f} sec".format(min_sec, max_sec))
-        prof.start_profile(ignore_modules)
 
-        t = time()
-        pre_macs = 0
-        macs_per_seq_len = []
+        if args.execution_time_only:
+            t = 0
+        else:
+            prof.start_profile(ignore_modules)
+            torch.cuda.synchronize()
+            pre_macs = 0
+            macs_per_seq_len = []
+            t = time()
         for inputs in samples:
-            _ = model(inputs, *model_args, **model_kwargs)
-            cur_macs = prof.get_total_macs()
-            macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
-            pre_macs = cur_macs
+            if args.execution_time_only:
+                for _ in range(10):
+                    start = torch.cuda.Event(enable_timing=True)
+                    end = torch.cuda.Event(enable_timing=True)
+                    start.record()
+                    _ = model(inputs, *model_args, **model_kwargs)
+                    end.record()
+                    torch.cuda.synchronize()
+                    t += start.elapsed_time(end)
+            else:
+                _ = model(inputs, *model_args, **model_kwargs)
+                cur_macs = prof.get_total_macs()
+                macs_per_seq_len.append((cur_macs - pre_macs) / inputs[0].shape[0])
+                pre_macs = cur_macs
 
-        flops = prof.get_total_flops()
-        macs = prof.get_total_macs()
-        params = prof.get_total_params()
-        prof.print_model_profile(
-            profile_step=10,
-            top_modules=3,
-            output_file=os.path.join(args.log_path, "{}_all.txt".format(args.upstream)),
-            device=args.device,
-            input_shape=[i[0].shape for i in samples]
-        )
-        t = time() - t
+        if args.execution_time_only:
+            # summary
+            logger.info(f"execution time: {t/1000/10:.4f}sec\n") # /1000 is for ms to s, /10 is for average
+        else:
+            torch.cuda.synchronize()
+            t = time() - t
+            flops = prof.get_total_flops()
+            macs = prof.get_total_macs()
+            params = prof.get_total_params()
+            prof.print_model_profile(
+                profile_step=10,
+                top_modules=3,
+                output_file=os.path.join(args.log_path, "{}_all.txt".format(args.upstream)),
+                device=args.device,
+                input_shape=[i[0].shape for i in samples]
+            )
 
-        prof.end_profile()
-            
-        M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
-        if args.as_string:
-            flops = number_to_string(flops, precision=args.precision)
-            macs = macs_to_string(macs, precision=args.precision)
-            params = params_to_string(params, precision=args.precision)
-            M = macs_to_string(M) + " / sec of an audio"
-            m = macs_to_string(m) + " / sec of an audio"
+            prof.end_profile()
+                
+            M, m = max(macs_per_seq_len) * args.sample_rate, min(macs_per_seq_len) * args.sample_rate
+            if args.as_string:
+                flops = number_to_string(flops, precision=args.precision)
+                macs = macs_to_string(macs, precision=args.precision)
+                params = params_to_string(params, precision=args.precision)
+                M = macs_to_string(M) + " / sec of an audio"
+                m = macs_to_string(m) + " / sec of an audio"
 
-        # summary
-        logger.info(f"summary, l = sequence length, bs = batch size\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
+            # summary
+            logger.info(f"summary, l = sequence length, bs = batch size\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
             
         
 
