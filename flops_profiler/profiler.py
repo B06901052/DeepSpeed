@@ -1424,8 +1424,11 @@ def _rnn_cell_forward_hook(rnn_cell_module, input, output):
 
 # RNN
 MODULE_HOOK_MAPPING = {
-    m: _rnn_cell_forward_hook for m in [nn.RNN, nn.GRU, nn.LSTM, nn.RNNCell, nn.LSTMCell, nn.GRUCell]
+    m: _rnn_cell_forward_hook for m in [nn.RNNCell, nn.LSTMCell, nn.GRUCell]
 }
+MODULE_HOOK_MAPPING.update({
+    m: _rnn_forward_hook for m in [nn.RNN, nn.GRU, nn.LSTM]
+})
 
 
 def get_model_profile(
