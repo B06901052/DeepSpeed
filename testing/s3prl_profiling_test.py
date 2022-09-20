@@ -59,6 +59,10 @@ wav_paths = [
     "test-clean/3729/6852/3729-6852-0045.flac",# 326000
 ]
 
+def synchronize(device):
+    if device != "cpu":
+        torch.cuda.synchronize()
+
 # args
 def get_profiling_args():
     parser=argparse.ArgumentParser()
@@ -181,7 +185,7 @@ def superb_profiling(
                     t = 0
                 else:
                     prof.start_profile(ignore_modules)
-                    torch.cuda.synchronize()
+                    synchronize(args.device)
                     pre_macs = 0
                     macs_per_seq_len = []
                     t = time()
@@ -193,7 +197,7 @@ def superb_profiling(
                             start.record()
                             _ = model(inputs, *model_args, **model_kwargs)
                             end.record()
-                            torch.cuda.synchronize()
+                            synchronize(args.device)
                             t += start.elapsed_time(end)
                     else:
                         _ = model(inputs, *model_args, **model_kwargs)
@@ -205,7 +209,7 @@ def superb_profiling(
                     # summary
                     logger.info(f"execution time: {t/1000/10:.4f}sec\n") # /1000 is for ms to s, /10 is for average
                 else:
-                    torch.cuda.synchronize()
+                    synchronize(args.device)
                     t = time() - t
                     flops = prof.get_total_flops()
                     macs = prof.get_total_macs()
@@ -241,7 +245,7 @@ def superb_profiling(
             t = 0
         else:
             prof.start_profile(ignore_modules)
-            torch.cuda.synchronize()
+            synchronize(args.device)
             pre_macs = 0
             macs_per_seq_len = []
             t = time()
@@ -253,7 +257,7 @@ def superb_profiling(
                     start.record()
                     _ = model(inputs, *model_args, **model_kwargs)
                     end.record()
-                    torch.cuda.synchronize()
+                    synchronize(args.device)
                     t += start.elapsed_time(end)
             else:
                 _ = model(inputs, *model_args, **model_kwargs)
@@ -265,7 +269,7 @@ def superb_profiling(
             # summary
             logger.info(f"execution time: {t/1000/10:.4f}sec\n") # /1000 is for ms to s, /10 is for average
         else:
-            torch.cuda.synchronize()
+            synchronize(args.device)
             t = time() - t
             flops = prof.get_total_flops()
             macs = prof.get_total_macs()
