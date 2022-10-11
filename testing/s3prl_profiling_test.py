@@ -134,7 +134,7 @@ def pseudo_input_profiling(
     
     M = macs/args.seq_len*args.sample_rate/args.batch_size if not args.as_string else "Not support --as_string"
     # summary
-    logger.info("summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {}\nsum of macs: {}\nparams: {}\nmacs/(l/sr)/bs: {}\n".format(flops, macs, params, M))
+    logger.info("summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {}\nsum of macs: {}\nparams: {} (nonzero: {nzparams})\nmacs/(l/sr)/bs: {}\n".format(flops, macs, params, M))
 
 
 def superb_profiling(
@@ -213,7 +213,7 @@ def superb_profiling(
                     t = time() - t
                     flops = prof.get_total_flops()
                     macs = prof.get_total_macs()
-                    params = prof.get_total_params()
+                    params, nzparams = prof.get_total_params()
                     prof.print_model_profile(
                         profile_step=10,
                         top_modules=3,
@@ -230,11 +230,12 @@ def superb_profiling(
                         flops = number_to_string(flops, precision=args.precision)
                         macs = macs_to_string(macs, precision=args.precision)
                         params = params_to_string(params, precision=args.precision)
+                        nzparams = params_to_string(nzparams, precision=args.precision)
                         M = macs_to_string(M) + " / sec of an audio"
                         m = macs_to_string(m) + " / sec of an audio"
 
                     # summary
-                    logger.info(f"summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
+                    logger.info(f"summary, l = sequence length, bs = batch size, sr = sample rate\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params} (nonzero: {nzparams})\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
                 
         # profile all
         min_sec = samples[0][0].shape[0] / args.sample_rate
@@ -273,7 +274,7 @@ def superb_profiling(
             t = time() - t
             flops = prof.get_total_flops()
             macs = prof.get_total_macs()
-            params = prof.get_total_params()
+            params, nzparams = prof.get_total_params()
             prof.print_model_profile(
                 profile_step=10,
                 top_modules=3,
@@ -289,11 +290,12 @@ def superb_profiling(
                 flops = number_to_string(flops, precision=args.precision)
                 macs = macs_to_string(macs, precision=args.precision)
                 params = params_to_string(params, precision=args.precision)
+                nzparams = params_to_string(nzparams, precision=args.precision)
                 M = macs_to_string(M) + " / sec of an audio"
                 m = macs_to_string(m) + " / sec of an audio"
 
             # summary
-            logger.info(f"summary, l = sequence length, bs = batch size\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params}\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
+            logger.info(f"summary, l = sequence length, bs = batch size\nsum of flops: {flops}\nsum of macs: {macs}\nparams: {params} (nonzero: {nzparams})\nrough time: {t:.3f}sec\nmacs/sec of an audio = macs/l/bs*sr\nmaximum of macs/sec of an audio: {M}\nminimum of macs/sec of an audio: {m}\n\n")
             
         
 

@@ -10,6 +10,8 @@ import torch.nn.functional as F
 import itertools
 from flops_profiler.utils import *
 
+# This is a beta feature for computing the # of ops for sparse network. It only support linear layer currently.
+ENABLE_SPARSE = False
 old_functions = {}
 try:
     import torchaudio
@@ -246,6 +248,7 @@ class FlopsProfiler(object):
             module.__flops__ = 0
             module.__macs__ = 0
             module.__params__ = sum(p.numel() for p in module.parameters())
+            module.__nzparams__ = sum(p.count_nonzero().item() for p in module.parameters())
             module.__start_time__ = 0
             module.__duration__ = 0
 
@@ -319,8 +322,12 @@ class FlopsProfiler(object):
         Returns:
             The number of parameters in the model.
         """
-        return params_to_string(
-            self.model.__params__, precision=self.precision) if as_string else self.model.__params__
+        return (
+            params_to_string(
+            self.model.__params__, precision=self.precision) if as_string else self.model.__params__,
+            params_to_string(
+            self.model.__nzparams__, precision=self.precision) if as_string else self.model.__nzparams__
+        )
 
     def print_model_profile(self,
                             profile_step=1,
@@ -356,11 +363,12 @@ class FlopsProfiler(object):
         total_flops = self.get_total_flops()
         total_macs = self.get_total_macs()
         total_duration = self.get_total_duration()
-        total_params = self.get_total_params()
+        total_params, total_nzparams = self.get_total_params()
 
         self.flops = total_flops
         self.macs = total_macs
         self.params = total_params
+        self.nzparams = total_nzparams
 
         print(
             "\n-------------------------- DeepSpeed Flops Profiler --------------------------"
@@ -569,9 +577,18 @@ def _prod(dims):
 
 
 def _linear_flops_compute(input, weight, bias=None):
-    out_features = weight.shape[0]
-    macs = input.numel() * out_features
-    return 2 * macs, macs
+    global ENABLE_SPARSE
+    out_features, in_features = weight.shape
+    if ENABLE_SPARSE:
+        w_zeros = weight.numel() - weight.count_nonzero().item()
+        
+        macs = input.numel() * out_features - w_zeros * (input.numel() // in_features)
+        bias_flop = 0 if bias is None else (input.numel() // in_features) * bias.count_nonzero().item()
+    else:
+        macs = input.numel() * out_features
+        bias_flop = 0 if bias is None else (input.numel() // in_features) * out_features
+        
+    return 2 * macs + bias_flop, macs
 
 
 def _xlu_flops_compute(input, *args, **kwargs):
@@ -1016,10 +1033,8 @@ def wrapFunc(module, func, name, funcFlopCompute):
     
     @functools.wraps(func)
     def newFunc(*args, **kwds):
-        if module_flop_count:
-            flop_len = len(module_flop_count[-1])
-        if module_mac_count:
-            mac_len = len(module_mac_count[-1])
+        flop_len = len(module_flop_count[-1])
+        mac_len = len(module_mac_count[-1])
         
         result = func(*args, **kwds)
         flops, macs = funcFlopCompute(*args, **kwds)
