@@ -10,6 +10,7 @@ import torch.nn as nn
 from config.scalerop import syntax_sugar_scalerop_test, torch_scalerop_test, torch_tensor_scalerop_test
 from config.tensorop import tensorop_test
 from config.mathop import torch_math_reduction_correctionop_test, torch_math_pointwiseop_test
+from config.MHA import mha_test
 
 all_variables = dir()
 
@@ -50,8 +51,8 @@ class UnitsModel(nn.Module):
         
         self.net = self.generate_blocks()
     
-    def forward(self, inputs):
-        return self.net(inputs)
+    def forward(self, inputs, *args, **kwargs):
+        return self.net(inputs, *args, **kwargs)
     
     def generate_blocks(self):
         nn.Sequential._get_name = lambda self: self.__name__
